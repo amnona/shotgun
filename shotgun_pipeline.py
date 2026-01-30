@@ -66,7 +66,7 @@ def clean_sample(sample_id, fastp_path='~/bin/fastp'):
     return
 
 
-def convert_to_fasta(sample_id, seqtk_path='~/bin/seqtk'):
+def convert_to_fasta(sample_id, seqtk_path='seqtk'):
     '''Convert cleaned fastq files to fasta using seqtk
 
     Parameters
