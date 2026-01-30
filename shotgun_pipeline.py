@@ -221,7 +221,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description='Shotgun pipeline version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-a', '--accession', help='SRA sample accession to process')
 
-    args = parser.parse_args(sys.argv)
+    args = parser.parse_args(sys.argv[1:])
     logger.info("Starting shotgun pipeline")
     if args.accession:
         sample_pipeline(args.accession)
