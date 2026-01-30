@@ -157,81 +157,13 @@ def sample_pipeline(sample_id):
     return
 
 
-def GetSRA(inputname, path, skipifthere=False, fastq=False, delimiter=None, outdir='fasta', split_files=False):
-        '''Get all the samples from the SRA. Using the Metadata (runinfo metadata) table SraRunTable.txt from the run browser
-
-        Parameters
-        ----------
-        inputname: str
-                the SraRunInfo.txt file. A table containing a column with Run_s/Run/acc column that contains the SRR accession numbers.
-        path: str
-                path to the SraToolKit binary directory
-        skipifthere: bool, optional
-                if true, do not download files that already exist
-        fastq: bool, optional
-                if true, download fastq instead of fasta
-        delimiter: str or None, optional
-                delimiter for the table. If none, autodetect
-        outdir: str, optional
-                name of the output directory for the downloads
-        split_files: bool, optional
-                if True, split the samples into forward and reverse reads
-
-        Returns
-        -------
-        num_files: int
-                number of files downloaded
-        '''
-        logger.info('Starting GetSRA with input file %s' % inputname)
-        # create output directory
-        if not os.path.exists(outdir):
-                os.makedirs(outdir)
-
-        # get the delimiter if not provided
-        if delimiter is None:
-                with open(inputname) as csvfile:
-                        xx = csv.Sniffer()
-                        res = xx.sniff(csvfile.readline(), delimiters=',\t')
-                        delimiter = res.delimiter
-                        logger.info('Detected delimiter %s' % delimiter)
-
-        ifile = csv.DictReader(open(inputname, 'r'), delimiter=delimiter)
-        num_files = 0
-        num_skipped = 0
-        for cline in ifile:
-                if 'Run_s' in cline:
-                        csamp = cline['Run_s']
-                elif 'Run' in cline:
-                        csamp = cline['Run']
-                elif 'acc' in cline:
-                        csamp = cline['acc']
-                num_files += 1
-                
-                if skipifthere:
-                        if os.path.isfile(os.path.join(outdir, csamp) + '.fasta'):
-                                logger.info("skipping sample %s. file exists" % csamp)
-                                continue
-
-                logger.info("getting file %s" % csamp)
-                params = [os.path.join(path, 'fastq-dump'), '--disable-multithreading']
-                params += ['--outdir', outdir]
-                if split_files:
-                        params += ['--split-files']
-                if not fastq:
-                        params += ['--fasta', '0']
-                params += [csamp]
-                logger.info(f"Running command: {' '.join(params)}")
-                subprocess.call(params)
-                print("got file %s" % csamp)
-        print('got %d files.' % num_files)
-        return num_files
-
-
 def main(argv):
     parser = argparse.ArgumentParser(description='Shotgun pipeline version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-a', '--accession', help='SRA sample accession to process')
 
     args = parser.parse_args(sys.argv[1:])
+    # add file logging
+    logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.accession:
         sample_pipeline(args.accession)
