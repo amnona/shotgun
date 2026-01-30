@@ -151,7 +151,7 @@ def sample_pipeline(sample_id):
     # Step 3: Convert to fasta
     convert_to_fasta(sample_id)
     # Step 4: Align to UniRef
-    align_to_uniref(sample_id)
+    align_to_uniref(f"{sample_id}-1.clean.fasta", output_file=f"{sample_id}-aligned.txt")
     logger.info(f"Finished processing sample {sample_id}")
     return
 
