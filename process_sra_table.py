@@ -7,7 +7,7 @@ import subprocess
 from loguru import logger
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True):
+def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -17,6 +17,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True):
         parallel: bool, optional
                 if true, run samples in parallel
         '''
+        pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
         # get the delimiter
         with open(inputname) as csvfile:
@@ -35,9 +36,9 @@ def run_pipeline_on_sra_table(inputname, parallel=True):
                         csamp = cline['acc']
                 logger.info(f"Processing sample {csamp} from SRA table")
                 if parallel:
-                    subprocess.Popen([sys.executable, __file__, '-a', csamp])
+                    subprocess.Popen([sys.executable, pipeline_script, '-a', csamp])
                 else:
-                    subprocess.call([sys.executable, __file__, '-a', csamp])
+                    subprocess.call([sys.executable, pipeline_script, '-a', csamp])
                 
         logger.info("Finished processing all samples from SRA table")
         return
