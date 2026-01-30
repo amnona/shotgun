@@ -106,6 +106,7 @@ def align_to_uniref(input_fasta, output_file, diamond_db='~/databases/uniref/db-
     '''
     logger.info(f"Running DIAMOND on {input_fasta}, outputting to {output_file} using DB {diamond_db}")
     diamond_path = os.path.expanduser(diamond_path)
+    diamond_db = os.path.expanduser(diamond_db)
     diamond_output_columns = ['sseqid','qseqid', 'qstart', 'qend', 'qframe', 'qstrand', 'sstart', 'send', 'qseq', 'qseq_translated', 'length', 'evalue', 'bitscore', 'gapopen', 'cigar', 'full_qseq']
     command = [
         diamond_path,
