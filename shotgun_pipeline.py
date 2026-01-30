@@ -234,7 +234,7 @@ def main(argv):
     logger.info("Starting shotgun pipeline")
     if args.accession:
         sample_pipeline(args.accession)
-    logger.info("Finished shotgun pipeline")
+    logger.info("Shotgun pipeline finished")
 
 
 if __name__ == "__main__":
