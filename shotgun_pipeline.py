@@ -33,7 +33,10 @@ def get_sample(sample_id, sra_path='~/bin/sratoolkit.3.2.0-centos_linux64/bin'):
     # fasterq-dump
     params = [os.path.join(sra_path, 'fasterq-dump'), './' + sample_id, '--split-files', '--threads', '4']
     logger.debug(f"Running command: {' '.join(params)}")
-    subprocess.call(params)
+    res = subprocess.call(params)
+    if res != 0:
+        logger.error(f"fasterq-dump failed with return code {res}")
+        raise RuntimeError("fasterq-dump execution failed")
     logger.info(f"Converted sample {sample_id} to fastq")
     return
 
@@ -55,7 +58,10 @@ def clean_sample(sample_id, fastp_path='~/bin/fastp'):
     output_r1 = f"{sample_id}-1.clean.fastq"
     params = [fastp_path, '-i', input_r1, '-o', output_r1, '--length_required', '50', '--qualified_quality_phred', '25']
     logger.debug(f"Running command: {' '.join(params)}")
-    subprocess.call(params)
+    res = subprocess.call(params)
+    if res != 0:
+        logger.error(f"fastp failed with return code {res}")
+        raise RuntimeError("fastp execution failed")
     logger.debug(f"Cleaned sample {sample_id}")
     return
 
@@ -77,7 +83,10 @@ def convert_to_fasta(sample_id, seqtk_path='~/bin/seqtk'):
     params = [seqtk_path, 'seq', '-a', input_fastq]
     logger.debug(f"Running command: {' '.join(params)}")
     with open(output_fasta, 'w') as outfile:
-        subprocess.call(params, stdout=outfile)
+        res = subprocess.call(params, stdout=outfile)
+    if res != 0:
+        logger.error(f"seqtk failed with return code {res}")
+        raise RuntimeError("seqtk execution failed")
     logger.debug(f"Converted sample {sample_id} to fasta")
     return
 
