@@ -35,10 +35,13 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 elif 'acc' in cline:
                         csamp = cline['acc']
                 logger.info(f"Processing sample {csamp} from SRA table")
+                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step)]
+                if skip_if_exists:
+                    cmd += ['--skip-if-exists']
                 if parallel:
-                    subprocess.Popen([sys.executable, pipeline_script, '-a', csamp, '--skip-if-exists', str(skip_if_exists), '--start-step', str(start_step)])
+                    subprocess.Popen(cmd)
                 else:
-                    subprocess.call([sys.executable, pipeline_script, '-a', csamp, '--skip-if-exists', str(skip_if_exists), '--start-step', str(start_step)])
+                    subprocess.call(cmd)
                 
         logger.info("Finished processing all samples from SRA table")
         return
