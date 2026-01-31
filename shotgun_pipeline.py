@@ -193,7 +193,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, log_file='process.log'):
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -208,19 +208,26 @@ def sample_pipeline(sample_id, skip_if_exists=True):
             SRA sample ID (SRRxxxxxx)
     skip_if_exists: bool, optional
             if true, skip each processing step if the relevant output file already exists
+    start_step: int, optional
+            step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
-    # Step 1: Download the sample
-    get_sample(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
-    # Step 2: Clean the sample
-    clean_sample(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
-    # Step 3: Convert to fasta
-    convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
-    # Step 4: Align to UniRef
-    align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
-    # Step 5: Split to per-UniRef ID files
-    split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+    if start_step <= 0:
+        # Step 0: Download the sample
+        get_sample(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+    if start_step <= 1:
+        # Step 1: Clean the sample
+        clean_sample(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+    if start_step <= 2:
+        # Step 2: Convert to fasta
+        convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+    if start_step <= 3:
+        # Step 3: Align to UniRef
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+    if start_step <= 4:
+        # Step 4: Split to per-UniRef ID files
+        split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     logger.info(f"Finished processing sample {sample_id}")
     return
 
@@ -228,13 +235,15 @@ def sample_pipeline(sample_id, skip_if_exists=True):
 def main(argv):
     parser = argparse.ArgumentParser(description='Shotgun pipeline version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-a', '--accession', help='SRA sample accession to process')
+    parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
+    parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.accession:
-        sample_pipeline(args.accession)
+        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step)
     logger.info("Shotgun pipeline finished")
 
 
