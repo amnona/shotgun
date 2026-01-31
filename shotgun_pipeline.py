@@ -44,6 +44,13 @@ def get_sample(sample_id, sra_path='~/bin/sratoolkit.3.2.0-centos_linux64/bin', 
     if res != 0:
         logger.error(f"fasterq-dump failed with return code {res}")
         raise RuntimeError("fasterq-dump execution failed")
+
+    # check is split to only one file, rename it to standard name
+    if not os.path.exists(f"{sample_id}_1.fastq"):
+        if os.path.exists(f"{sample_id}.fastq"):
+                os.rename(f"{sample_id}.fastq", f"{sample_id}_1.fastq")
+                logger.info(f'Renamed {sample_id}.fastq to {sample_id}_1.fastq')
+
     logger.info(f"Converted sample {sample_id} to fastq")
     return
 
