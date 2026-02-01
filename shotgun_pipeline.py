@@ -167,17 +167,21 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
     return
 
 
-def split_to_uniref(sample_id, skip_if_exists=True, log_file='process.log'):
+def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='process.log', buffer_threshold=1000):
     '''Split DIAMOND output file into separate files per UniRef ID
 
     Parameters
     ----------
-    diamond_output: str
-        path to DIAMOND output file
-    out_dir: str
-        output directory to store per-UniRef ID files
+    sample_id: str
+        SRA sample ID (SRRxxxxxx)
     skip_if_exists: bool, optional
         if true, skip splitting if the output directory already exists and is not empty
+    min_keep: int, optional
+        minimum number of reads to keep a uniref file
+    log_file: str, optional
+        log file path
+    buffer_threshold: int, optional
+        number of reads to buffer before flushing to file
     '''
     diamond_output = f"{sample_id}-aligned.txt"
     out_dir = f"{sample_id}-splits"
@@ -188,15 +192,44 @@ def split_to_uniref(sample_id, skip_if_exists=True, log_file='process.log'):
                 return
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
-    uniref_ids = defaultdict(int)
+    
+    # Dictionary to store buffers and counts for each uniref_id
+    buffers = defaultdict(list)
+    uniref_counts = defaultdict(int)
+    
+    def flush_buffer(uniref_id, force=False):
+        """Flush buffer for a specific uniref_id to file"""
+        if uniref_id in buffers and len(buffers[uniref_id]) > 0:
+            # During final flush, only write if we have enough reads
+            if force and uniref_counts[uniref_id] < min_keep:
+                buffers[uniref_id].clear()
+                return
+            
+            with open(os.path.join(out_dir, f"{uniref_id}.txt"), 'a') as out_f:
+                out_f.writelines(buffers[uniref_id])
+            buffers[uniref_id].clear()
+    
     with open(diamond_output, 'r') as f:
         for line in f:
             parts = line.strip().split('\t', maxsplit=1)
             uniref_id = parts[0]
-            uniref_ids[uniref_id] += 1
-            with open(os.path.join(out_dir, f"{uniref_id}.txt"), 'a') as out_f:
-                out_f.write(line)
-    logger.info(f"Completed splitting DIAMOND output into {len(uniref_ids)} uniref ids, total lines: {sum(uniref_ids.values())}")
+            uniref_counts[uniref_id] += 1
+            buffers[uniref_id].append(line)
+            
+            # Flush if buffer reaches threshold
+            if len(buffers[uniref_id]) >= buffer_threshold:
+                flush_buffer(uniref_id)
+    
+    # Final flush of all remaining buffers
+    kept_uniref_ids = 0
+    for uniref_id in list(buffers.keys()):
+        if uniref_counts[uniref_id] >= min_keep:
+            flush_buffer(uniref_id, force=True)
+            kept_uniref_ids += 1
+        else:
+            buffers[uniref_id].clear()  # Discard buffers below threshold
+    
+    logger.info(f"Completed splitting DIAMOND output into {kept_uniref_ids} uniref ids (kept), total lines: {sum(count for uid, count in uniref_counts.items() if count >= min_keep)}")
     return
 
 
