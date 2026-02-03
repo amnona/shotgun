@@ -65,7 +65,7 @@ def main(argv):
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
-    paerser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
+    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
