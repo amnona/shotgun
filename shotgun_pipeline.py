@@ -118,7 +118,7 @@ def convert_to_fasta(sample_id, seqtk_path='seqtk', skip_if_exists=True, log_fil
     return
 
 
-def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log'):
+def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast'):
     '''Align input fasta file to UniRef database using DIAMOND
     Parameters
     ----------
@@ -132,6 +132,8 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
             path to DIAMOND binary
     skip_if_exists: bool, optional
             if true, skip alignment if the output file already exists
+    sensitivity: str, optional
+            sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
     '''
     output_file = f"{sample_id}-aligned.txt"
     input_fasta = f"{sample_id}-1.clean.fasta"
@@ -148,7 +150,7 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         'blastx',
         '--db', diamond_db,
         '--out', output_file,
-        '--fast',
+        '--' + sensitivity,
         '--min-orf', '1',
         '--query', input_fasta,
         '--strand', 'both',
@@ -233,7 +235,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd'):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast'):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -252,6 +254,8 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
             step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
     database: str, optional
         location of the diamond uniref database to use for alignment
+    sensitivity: str, optional
+        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
@@ -266,7 +270,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 3:
         # Step 3: Align to UniRef
-        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database)
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity)
     if start_step <= 4:
         # Step 4: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -280,13 +284,13 @@ def main(argv):
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
-
+    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.accession:
-        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database)
+        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity)
     logger.info("Shotgun pipeline finished")
 
 

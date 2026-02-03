@@ -7,7 +7,7 @@ import subprocess
 from loguru import logger
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd'):
+def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -24,6 +24,8 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
         database: str, optional
                 location of the diamond uniref database to use for alignment
+        sensitivity: str, optional
+                sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
         '''
         pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
@@ -43,7 +45,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 elif 'acc' in cline:
                         csamp = cline['acc']
                 logger.info(f"Processing sample {csamp} from SRA table")
-                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database]
+                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity]
                 if skip_if_exists:
                     cmd += ['--skip-if-exists']
                 if parallel:
@@ -63,13 +65,14 @@ def main(argv):
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
+    paerser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.input:
-        run_pipeline_on_sra_table(args.input, parallel=args.parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database)
+        run_pipeline_on_sra_table(args.input, parallel=args.parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity)
     logger.info("Shotgun pipeline finished")
 
 
