@@ -7,7 +7,7 @@ import subprocess
 from loguru import logger
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0):
+def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -16,6 +16,14 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 the SraRunInfo.txt file. A table containing a column with Run_s/Run/acc column that contains the SRR accession numbers.
         parallel: bool, optional
                 if true, run samples in parallel
+        pipeline_script: str, optional
+                path to the shotgun pipeline script (shotgun_pipeline.py)
+        skip_if_exists: bool, optional
+                if true, skip each processing step if the relevant output file already exists
+        start_step: int, optional
+                step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
+        database: str, optional
+                location of the diamond uniref database to use for alignment
         '''
         pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
@@ -35,7 +43,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 elif 'acc' in cline:
                         csamp = cline['acc']
                 logger.info(f"Processing sample {csamp} from SRA table")
-                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step)]
+                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database]
                 if skip_if_exists:
                     cmd += ['--skip-if-exists']
                 if parallel:
