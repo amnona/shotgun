@@ -233,7 +233,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd'):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -250,6 +250,8 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0):
             if true, skip each processing step if the relevant output file already exists
     start_step: int, optional
             step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
+    database: str, optional
+        location of the diamond uniref database to use for alignment
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
@@ -264,7 +266,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0):
         convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 3:
         # Step 3: Align to UniRef
-        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database)
     if start_step <= 4:
         # Step 4: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -277,13 +279,14 @@ def main(argv):
     parser.add_argument('-a', '--accession', help='SRA sample accession to process')
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
+    parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.accession:
-        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step)
+        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database)
     logger.info("Shotgun pipeline finished")
 
 
