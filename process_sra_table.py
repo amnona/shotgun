@@ -79,7 +79,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
                 while len(running_processes) < num_parallel and sample_index < len(samples):
                     csamp = samples[sample_index]
                     logger.info(f"Processing sample {csamp} from SRA table ({sample_index + 1}/{len(samples)})")
-                    cmd = base_cmd.copy() + ['-i', csamp]
+                    cmd = base_cmd.copy() + ['-a', csamp]
                     process = subprocess.Popen(cmd)
                     running_processes.append(process)
                     sample_index += 1
@@ -91,7 +91,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
             # Sequential processing
             for i, csamp in enumerate(samples):
                 logger.info(f"Processing sample {csamp} from SRA table ({i + 1}/{len(samples)})")
-                cmd = base_cmd.copy() + ['-i', csamp]
+                cmd = base_cmd.copy() + ['-a', csamp]
                 subprocess.call(cmd)
                 
         logger.info("Finished processing all samples from SRA table")
