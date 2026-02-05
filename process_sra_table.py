@@ -7,7 +7,7 @@ import subprocess
 from loguru import logger
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast'):
+def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, type=None, threads='10'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -29,6 +29,15 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
         '''
         pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
+        if type is not None:
+            if type == 'uriref50':
+                database = os.path.expanduser('~/databases/uniref/db-uniref50.dmnd')
+                sensitivity = 'sensitive'
+                iterate = True
+            elif type == 'uriref90':
+                database = os.path.expanduser('~/databases/uniref/db-uniref90.dmnd')
+                sensitivity = 'fast'
+                iterate = False
         # get the delimiter
         with open(inputname) as csvfile:
                 xx = csv.Sniffer()
@@ -45,9 +54,11 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 elif 'acc' in cline:
                         csamp = cline['acc']
                 logger.info(f"Processing sample {csamp} from SRA table")
-                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity]
+                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads]
                 if skip_if_exists:
                     cmd += ['--skip-if-exists']
+                if iterate:
+                    cmd += ['--iterate']
                 if parallel:
                     subprocess.Popen(cmd)
                 else:
@@ -66,13 +77,16 @@ def main(argv):
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
     parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
+    parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False)
+    parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
+    parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='10')
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.input:
-        run_pipeline_on_sra_table(args.input, parallel=args.parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity)
+        run_pipeline_on_sra_table(args.input, parallel=args.parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
     logger.info("Shotgun pipeline finished")
 
 

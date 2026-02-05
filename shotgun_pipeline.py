@@ -118,7 +118,7 @@ def convert_to_fasta(sample_id, seqtk_path='seqtk', skip_if_exists=True, log_fil
     return
 
 
-def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast'):
+def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast', threads='10'):
     '''Align input fasta file to UniRef database using DIAMOND
     Parameters
     ----------
@@ -134,6 +134,8 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
             if true, skip alignment if the output file already exists
     sensitivity: str, optional
             sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+    threads: str, optional
+            number of threads to use for DIAMOND alignment
     '''
     output_file = f"{sample_id}-aligned.txt"
     input_fasta = f"{sample_id}-1.clean.fasta"
@@ -156,7 +158,7 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         '--strand', 'both',
         '--max-target-seqs', '1',
         '--un', output_file + '.unmatched.fasta',
-        '--threads', '10',
+        '--threads', threads,
         '--outfmt', '6'
     ]
     command.extend(diamond_output_columns)
@@ -235,7 +237,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast'):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10'):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -256,6 +258,8 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         location of the diamond uniref database to use for alignment
     sensitivity: str, optional
         sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+    threads: str, optional
+        number of threads to use for diamond alignment
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
@@ -270,7 +274,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 3:
         # Step 3: Align to UniRef
-        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity)
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads)
     if start_step <= 4:
         # Step 4: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -285,12 +289,13 @@ def main(argv):
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
     parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
+    parser.add_argument('--threads', type=str, help='Number of threads to use for diamond alignment', default='10')
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.accession:
-        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity)
+        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads)
     logger.info("Shotgun pipeline finished")
 
 
