@@ -2,12 +2,13 @@
 import os
 import sys
 import csv
+import time
 import argparse
 import subprocess
 from loguru import logger
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, type=None, threads='10'):
+def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, type=None, threads='10'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -16,6 +17,8 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 the SraRunInfo.txt file. A table containing a column with Run_s/Run/acc column that contains the SRR accession numbers.
         parallel: bool, optional
                 if true, run samples in parallel
+        num_parallel: int, optional
+                maximum number of parallel processes to run simultaneously
         pipeline_script: str, optional
                 path to the shotgun pipeline script (shotgun_pipeline.py)
         skip_if_exists: bool, optional
@@ -38,13 +41,15 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                 database = os.path.expanduser('~/databases/uniref/db-uniref90.dmnd')
                 sensitivity = 'fast'
                 iterate = False
+
         # get the delimiter
         with open(inputname) as csvfile:
                 xx = csv.Sniffer()
                 res = xx.sniff(csvfile.readline(), delimiters=',\t')
                 delimiter = res.delimiter
                 logger.info(f"Detected delimiter {delimiter}")
-        
+        # Collect all samples first
+        samples = []
         ifile = csv.DictReader(open(inputname, 'r'), delimiter=delimiter)
         for cline in ifile:
                 if 'Run_s' in cline:
@@ -53,16 +58,41 @@ def run_pipeline_on_sra_table(inputname, parallel=True, pipeline_script='~/git/s
                         csamp = cline['Run']
                 elif 'acc' in cline:
                         csamp = cline['acc']
-                logger.info(f"Processing sample {csamp} from SRA table")
-                cmd = [sys.executable, pipeline_script, '-a', csamp, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads]
-                if skip_if_exists:
-                    cmd += ['--skip-if-exists']
-                if iterate:
-                    cmd += ['--iterate']
-                if parallel:
-                    subprocess.Popen(cmd)
-                else:
-                    subprocess.call(cmd)
+                samples.append(csamp)
+
+        # Build the command to run for each sample
+        base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads]
+        if skip_if_exists:
+                base_cmd += ['--skip-if-exists']
+        if iterate:
+                base_cmd += ['--iterate']
+        if parallel:
+            # Process samples with limited parallelism
+            running_processes = []
+            sample_index = 0
+            
+            while sample_index < len(samples) or running_processes:
+                # Remove finished processes
+                running_processes = [p for p in running_processes if p.poll() is None]
+                
+                # Start new processes if we have capacity and samples to process
+                while len(running_processes) < num_parallel and sample_index < len(samples):
+                    csamp = samples[sample_index]
+                    logger.info(f"Processing sample {csamp} from SRA table ({sample_index + 1}/{len(samples)})")
+                    cmd = base_cmd.copy() + ['-i', csamp]
+                    process = subprocess.Popen(cmd)
+                    running_processes.append(process)
+                    sample_index += 1
+                
+                # Wait a bit before checking again (avoid busy waiting)
+                if running_processes:
+                    time.sleep(1)
+        else:
+            # Sequential processing
+            for i, csamp in enumerate(samples):
+                logger.info(f"Processing sample {csamp} from SRA table ({i + 1}/{len(samples)})")
+                cmd = base_cmd.copy() + ['-i', csamp]
+                subprocess.call(cmd)
                 
         logger.info("Finished processing all samples from SRA table")
         return
@@ -72,6 +102,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description='process_sra_table', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-i', '--input', help='SRA table file name')
     parser.add_argument('-p', '--parallel', help='Process samples in parallel', action='store_true', default=False)
+    parser.add_argument('--num-parallel', type=int, help='Maximum number of parallel processes to run simultaneously', default=5)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
@@ -86,7 +117,7 @@ def main(argv):
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
     if args.input:
-        run_pipeline_on_sra_table(args.input, parallel=args.parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
+        run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
     logger.info("Shotgun pipeline finished")
 
 
