@@ -8,6 +8,16 @@ import subprocess
 from loguru import logger
 
 
+# helper class to track which arguments were provided by the user vs. which are defaults
+class TrackAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        # Mark this specific argument as 'provided'
+        provided = getattr(namespace, 'provided_args', set())
+        provided.add(self.dest)
+        setattr(namespace, 'provided_args', provided)
+
+
 def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, type=None, threads='10'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
@@ -100,24 +110,43 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
 
 def main(argv):
     parser = argparse.ArgumentParser(description='process_sra_table', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-i', '--input', help='SRA table file name')
+    parser.add_argument('-i', '--input', help='SRA table file name', required=True)
     parser.add_argument('-p', '--parallel', help='Process samples in parallel', action='store_true', default=False)
-    parser.add_argument('--num-parallel', type=int, help='Maximum number of parallel processes to run simultaneously', default=5)
+    parser.add_argument('--num-parallel', type=int, help='Maximum number of parallel processes to run simultaneously', default=10)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
-    parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
-    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
-    parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False)
+    parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd', action=TrackAction)
+    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast', action=TrackAction)
+    parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False, action=TrackAction)
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
-    parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='10')
+    parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
 
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
-    if args.input:
-        run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
+
+    if args.type:
+        if args.type == 'uniref50':
+            if 'database' not in getattr(args, 'provided_args', set()):
+                args.database = '~/databases/uniref/db-uniref50.dmnd'
+            if 'sensitivity' not in getattr(args, 'provided_args', set()):
+                args.sensitivity = 'fast'
+            if 'iterate' not in getattr(args, 'provided_args', set()):
+                args.iterate = False
+        elif args.type == 'uniref90':
+            if 'database' not in getattr(args, 'provided_args', set()):
+                args.database = '~/databases/uniref/db-uniref90.dmnd'
+            if 'sensitivity' not in getattr(args, 'provided_args', set()):
+                args.sensitivity = 'sensitive'
+            if 'iterate' not in getattr(args, 'provided_args', set()):
+                args.iterate = True
+        else:
+            logger.warning(f"Unknown type {args.type}, using provided or default parameters")
+
+
+    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
     logger.info("Shotgun pipeline finished")
 
 
