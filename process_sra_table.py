@@ -118,7 +118,7 @@ def main(argv):
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd', action=TrackAction)
     parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast', action=TrackAction)
-    parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False, action=TrackAction)
+    parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False)
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
     parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
 
@@ -133,14 +133,11 @@ def main(argv):
                 args.database = '~/databases/uniref/db-uniref50.dmnd'
             if 'sensitivity' not in getattr(args, 'provided_args', set()):
                 args.sensitivity = 'fast'
-            if 'iterate' not in getattr(args, 'provided_args', set()):
-                args.iterate = False
         elif args.type == 'uniref90':
             if 'database' not in getattr(args, 'provided_args', set()):
                 args.database = '~/databases/uniref/db-uniref90.dmnd'
             if 'sensitivity' not in getattr(args, 'provided_args', set()):
                 args.sensitivity = 'sensitive'
-            if 'iterate' not in getattr(args, 'provided_args', set()):
                 args.iterate = True
         else:
             logger.warning(f"Unknown type {args.type}, using provided or default parameters")
