@@ -158,9 +158,12 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         '--strand', 'both',
         '--max-target-seqs', '1',
         '--un', output_file + '.unmatched.fasta',
-        '--threads', threads,
-        '--outfmt', '6'
-    ]
+        '--threads', threads]
+    # add --iterate flag for more sensitive modes to improve performance
+    if sensitivity not in ['fast','mid-sensitive']:
+        command.append('--iterate')
+    # set the output format to tabular with specific columns
+    command.extend(['--outfmt', '6'])
     command.extend(diamond_output_columns)
     with open(log_file, 'a') as logfile:
         res = subprocess.run(command, stdout=logfile, stderr=logfile)
