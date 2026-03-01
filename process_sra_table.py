@@ -18,7 +18,7 @@ class TrackAction(argparse.Action):
         setattr(namespace, 'provided_args', provided)
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, type=None, threads='10'):
+def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10'):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -39,6 +39,10 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
                 location of the diamond uniref database to use for alignment
         sensitivity: str, optional
                 sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+        iterate: bool, optional
+                whether to use the --iterate flag for diamond alignment (for iterative searches)
+        threads: str, optional
+                number of threads to use for diamond alignment
         '''
         pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
@@ -143,7 +147,7 @@ def main(argv):
             logger.warning(f"Unknown type {args.type}, using provided or default parameters")
 
 
-    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, type=args.type)
+    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, threads=args.threads)
     logger.info("Shotgun pipeline finished")
 
 
