@@ -291,7 +291,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Shotgun pipeline version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-a', '--accession', help='SRA sample accession to process')
+    parser.add_argument('-a', '--accession', help='SRA sample accession to process', required=True)
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
@@ -303,8 +303,7 @@ def main(argv):
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
-    if args.accession:
-        sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate)
+    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate)
     logger.info("Shotgun pipeline finished")
 
 
