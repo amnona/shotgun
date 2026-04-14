@@ -194,7 +194,7 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
             number of threads to use for DIAMOND alignment
     '''
     output_file = f"{sample_id}-aligned.txt"
-    input_fasta = f"{sample_id}-1.clean.fasta"
+    input_fasta = f"{sample_id}-1.clean.rarified.fasta"
     if skip_if_exists:
         if os.path.exists(output_file):
                 logger.info(f"Alignment output file {output_file} already exists, skipping alignment")
