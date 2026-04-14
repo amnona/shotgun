@@ -172,26 +172,28 @@ def rarify_fasta(sample_id, depth, seqtk_path='seqtk', skip_if_exists=True, rand
     logger.debug(f"Rarified sample {sample_id} to depth {depth}")
     return
 
-def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast', threads='10', iterate=False):
+def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast', threads='10', iterate=False, tmp_dir=None):
     '''Align input fasta file to UniRef database using DIAMOND
     Parameters
     ----------
     input_fasta: str
-            path to input fasta file
+        path to input fasta file
     output_file: str
-            path to output file
+        path to output file
     diamond_db: str, optional
-            path to DIAMOND UniRef database
+        path to DIAMOND UniRef database
     diamond_path: str, optional
-            path to DIAMOND binary
+        path to DIAMOND binary
     skip_if_exists: bool, optional
-            if true, skip alignment if the output file already exists
+        if true, skip alignment if the output file already exists
     sensitivity: str, optional
-            sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
     iterate: bool, optional
-            whether to use the --iterate flag for DIAMOND alignment (for iterative searches, recommended for more sensitive modes)
+        whether to use the --iterate flag for DIAMOND alignment (for iterative searches, recommended for more sensitive modes)
     threads: str, optional
-            number of threads to use for DIAMOND alignment
+        number of threads to use for DIAMOND alignment
+    tmp_dir: str, optional
+        path to temporary directory to use for DIAMOND (if not set, will use current directory)
     '''
     output_file = f"{sample_id}-aligned.txt"
     input_fasta = f"{sample_id}-1.clean.rarified.fasta"
@@ -215,6 +217,13 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         '--max-target-seqs', '1',
         '--un', output_file + '.unmatched.fasta',
         '--threads', threads]
+    # if using tmp dir, add it to the command
+    if tmp_dir is not None:
+        tmp_dir = os.path.expanduser(tmp_dir)
+        tmp_dir = os.path.join(tmp_dir, sample_id)
+        if not os.path.exists(tmp_dir):
+            os.makedirs(tmp_dir)
+        command.extend(['--tmpdir', tmp_dir])
     # add --iterate flag for more sensitive modes to improve performance
     if iterate:
         command.append('--iterate')
@@ -296,7 +305,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=None):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=None, tmp_dir=None):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -325,6 +334,8 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         number of threads to use for diamond alignment
     iterate: bool, optional
         whether to use the --iterate flag for diamond alignment (for iterative searches, recommended for more sensitive modes)
+    tmp_dir: str, optional
+        path to temporary directory to use for DIAMOND (if not set, will use current directory)
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
@@ -342,7 +353,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         rarify_fasta(sample_id, depth=depth, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 4:
         # Step 3: Align to UniRef
-        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads, iterate=iterate)
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads, iterate=iterate, tmp_dir=tmp_dir)
     if start_step <= 5:
         # Step 4: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -362,11 +373,12 @@ def main(argv):
     parser.add_argument('--iterate', action='store_true', help='diamond --iterate flag (for iterative searches)', default=False)
     parser.add_argument('--paired', action='store_true', help='Whether to use paired-end data (True) or only forward reads (False)', default=False)
     parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth', default=None)
+    parser.add_argument('--tmp-dir', type=str, help='Path to temporary directory to use for DIAMOND (if not set, will use current directory)', default=None)
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
-    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth)
+    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth, tmp_dir=args.tmp_dir)
     logger.info("Shotgun pipeline finished")
 
 
