@@ -142,6 +142,7 @@ def main(argv):
     logger.remove()
     logger.add("shotgun_pipeline.log", rotation="10 MB", level=args.log_level.upper())
     logger.info("Starting shotgun pipeline")
+    logger.debug(f"Parsed arguments: {args}")
 
     if args.type:
         if args.type == 'uniref50':
