@@ -83,6 +83,8 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
 
         # Build the command to run for each sample
         base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--tmp-dir', tmp_dir, '--depth', str(depth)]
+        for x in base_cmd:
+                logger.debug(f"Command component: {x}")
         logger.debug(f"Base command for pipeline: {' '.join(base_cmd)}")
         if skip_if_exists:
                 base_cmd += ['--skip-if-exists']
@@ -138,9 +140,12 @@ def main(argv):
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
 
     args = parser.parse_args(sys.argv[1:])
-    # set logging level
+    
+    # set logging level and create a file and console logger
     logger.remove()
     logger.add("shotgun_pipeline.log", rotation="10 MB", level=args.log_level.upper())
+    logger.add(sys.stdout, level=args.log_level.upper())
+    
     logger.info("Starting shotgun pipeline")
     logger.debug(f"Parsed arguments: {args}")
 
