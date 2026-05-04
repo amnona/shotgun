@@ -127,14 +127,14 @@ def convert_to_fasta(sample_id, seqtk_path='seqtk', skip_if_exists=True, log_fil
 
 def rarify_fasta(sample_id, depth, seqtk_path='seqtk', skip_if_exists=True, random_seed=2026, log_file='process.log'):
     '''Rarify a fasta file to a specified depth by randomly subsampling readsm using seqtk
-    if depth is None, no rarification is performed and the original fasta file is copied to the rarified fasta file (if it doesn't already exist)
+    if depth is 0, no rarification is performed and the original fasta file is copied to the rarified fasta file (if it doesn't already exist)
     
     Parameters
     ----------
     sample_id: str
         SRA sample ID (SRRxxxxxx)
     depth: int
-        number of reads to rarify to
+        number of reads to rarify to (0 means no rarification, the original fasta file will be copied to the rarified fasta file)
     seqtk_path: str, optional
         path to the seqtk binary
     skip_if_exists: bool, optional
@@ -142,7 +142,7 @@ def rarify_fasta(sample_id, depth, seqtk_path='seqtk', skip_if_exists=True, rand
     log_file: str, optional
         log file path
     '''
-    if depth is None:
+    if depth == 0:
         logger.info(f"No rarification depth specified, copying original fasta file for sample {sample_id} to rarified fasta file")
         input_fasta = f"{sample_id}-1.clean.fasta"
         output_fasta = f"{sample_id}-1.clean.rarified.fasta"
@@ -305,7 +305,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=None, tmp_dir=None):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=0, tmp_dir=None):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -349,7 +349,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         # Step 2: Convert to fasta
         convert_to_fasta(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 3:
-        # Step 3: Rarify to specified depth (if depth is None, no rarification is performed and the original fasta file is copied to the rarified fasta file)
+        # Step 3: Rarify to specified depth (if depth is 0, no rarification is performed and the original fasta file is copied to the rarified fasta file)
         rarify_fasta(sample_id, depth=depth, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 4:
         # Step 3: Align to UniRef
@@ -372,7 +372,7 @@ def main(argv):
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (database, sensitivity, iterate)', default=None)
     parser.add_argument('--iterate', action='store_true', help='diamond --iterate flag (for iterative searches)', default=False)
     parser.add_argument('--paired', action='store_true', help='Whether to use paired-end data (True) or only forward reads (False)', default=False)
-    parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth', default=None)
+    parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth (0 means no rarification)', default=0)
     parser.add_argument('--tmp-dir', type=str, help='Path to temporary directory to use for DIAMOND (if not set, will use current directory)', default=None)
     args = parser.parse_args(sys.argv[1:])
     # add file logging

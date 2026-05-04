@@ -18,7 +18,7 @@ class TrackAction(argparse.Action):
         setattr(namespace, 'provided_args', provided)
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=None, tmp_dir=None, type=None):
+def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=0, tmp_dir=None, type=None):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -44,7 +44,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
         threads: str, optional
                 number of threads to use for diamond alignment
         depth: int, optional
-                if set, rarify each sample to this depth before alignment
+                if set, rarify each sample to this depth before alignment (0 means no rarification)
         tmp_dir: str, optional
                 path to temporary directory to use for DIAMOND (if not set, will use current directory)
         type: str, optional
@@ -135,7 +135,7 @@ def main(argv):
     parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False)
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
     parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
-    parser.add_argument('--depth', type=int, help='Rarification depth for each sample', default=None)
+    parser.add_argument('--depth', type=int, help='Rarification depth for each sample (0 means no rarification)', default=0)
     parser.add_argument('--tmp-dir', type=str, help='Temporary directory to use for DIAMOND', default=None)
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
 
