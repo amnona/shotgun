@@ -18,7 +18,7 @@ class TrackAction(argparse.Action):
         setattr(namespace, 'provided_args', provided)
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=0, tmp_dir=None, type=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin'):
+def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=0, tmp_dir=None, type=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin', paired=False):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -52,6 +52,8 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
         type: str, optional
                 if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database) unless those parameters were explicitly provided by the user
                 None (default): use provided or default parameters for all settings
+        paired: bool, optional
+                whether to use paired-end reads (True) or only forward reads (False) when downloading samples with sra-toolkit (if False, only the _1 files will be used)
         '''
         pipeline_script = os.path.expanduser(pipeline_script)
         logger.info(f"Running pipeline on SRA table {inputname} with parallel={parallel}")
@@ -84,7 +86,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
                 samples.append(csamp)
 
         # Build the command to run for each sample
-        base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--depth', str(depth), '--sra-path', sra_path]
+        base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--depth', str(depth), '--sra-path', sra_path, '--paired' if paired]
         # Add the tmp dir if provided
         if tmp_dir:
             base_cmd += ['--tmp-dir', tmp_dir]
@@ -141,6 +143,7 @@ def main(argv):
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
     parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
     parser.add_argument('--depth', type=int, help='Rarification depth for each sample (0 means no rarification)', default=0)
+    parser.add_argument('--paired', action='store_true', help='Whether to use paired-end reads (True) or only forward reads (False)', default=False)
     parser.add_argument('--tmp-dir', type=str, help='Temporary directory to use for DIAMOND', default=None)
     parser.add_argument('--sra-path', type=str, help='Path to sra-toolkit binaries', default='~/bin/sratoolkit.3.3.0-alma_linux64/bin')
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
@@ -171,7 +174,7 @@ def main(argv):
             logger.warning(f"Unknown type {args.type}, using provided or default parameters")
 
 
-    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, threads=args.threads, depth=args.depth, tmp_dir=args.tmp_dir, type=args.type, sra_path=args.sra_path)
+    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, threads=args.threads, depth=args.depth, tmp_dir=args.tmp_dir, type=args.type, sra_path=args.sra_path, paired=args.paired)
     logger.info("Shotgun pipeline finished")
 
 
