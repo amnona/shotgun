@@ -86,7 +86,10 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
                 samples.append(csamp)
 
         # Build the command to run for each sample
-        base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--depth', str(depth), '--sra-path', sra_path, '--paired' if paired]
+        base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--depth', str(depth), '--sra-path', sra_path]
+        # Add the paired flag if set
+        if paired:
+            base_cmd += ['--paired']
         # Add the tmp dir if provided
         if tmp_dir:
             base_cmd += ['--tmp-dir', tmp_dir]
