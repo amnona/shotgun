@@ -305,7 +305,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=0, tmp_dir=None):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=0, tmp_dir=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin'):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -341,7 +341,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
     logger.info(f"Processing sample {sample_id}")
     if start_step <= 0:
         # Step 0: Download the sample
-        get_sample(sample_id, skip_if_exists=skip_if_exists, paired=paired, log_file=log_file)
+        get_sample(sample_id, skip_if_exists=skip_if_exists, paired=paired, log_file=log_file, sra_path=sra_path)
     if start_step <= 1:
         # Step 1: Clean the sample
         clean_sample(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -374,11 +374,12 @@ def main(argv):
     parser.add_argument('--paired', action='store_true', help='Whether to use paired-end data (True) or only forward reads (False)', default=False)
     parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth (0 means no rarification)', default=0)
     parser.add_argument('--tmp-dir', type=str, help='Path to temporary directory to use for DIAMOND (if not set, will use current directory)', default=None)
+    parser.add_argument('--sra-path', type=str, help='Path to sra-toolkit binaries', default='~/bin/sratoolkit.3.3.0-alma_linux64/bin')
     args = parser.parse_args(sys.argv[1:])
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
-    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth, tmp_dir=args.tmp_dir)
+    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth, tmp_dir=args.tmp_dir, sra_path=args.sra_path)
     logger.info("Shotgun pipeline finished")
 
 
