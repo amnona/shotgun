@@ -43,9 +43,9 @@ def get_sample(sample_id, sra_path='~/bin/sratoolkit.3.2.0-centos_linux64/bin', 
     if paired:
         # if paired, we create a single file with both f and r reads (we don't care about separating them since we will be aligning to uniref and not doing assembly)
         params.append('--split-spot')
-    else:
-        # not pair - we will use only the first read, so we will ignore the _2 file if it is created
-        params.remove('--split-files')
+    # else:
+    #     # not pair - we will use only the first read, so we will ignore the _2 file if it is created
+    #     params.remove('--split-files')
     logger.debug(f"Running command: {' '.join(params)}")
     with open(log_file, 'a') as logfile:
         res = subprocess.call(params, stdout=logfile, stderr=logfile)
