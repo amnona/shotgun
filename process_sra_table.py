@@ -83,6 +83,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
 
         # Build the command to run for each sample
         base_cmd = [sys.executable, pipeline_script, '--start-step', str(start_step), '--database', database, '--sensitivity', sensitivity, '--threads', threads, '--tmp-dir', tmp_dir, '--depth', str(depth)]
+        logger.debug(f"Base command for pipeline: {' '.join(base_cmd)}")
         if skip_if_exists:
                 base_cmd += ['--skip-if-exists']
         if iterate:
