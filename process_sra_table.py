@@ -135,10 +135,12 @@ def main(argv):
     parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
     parser.add_argument('--depth', type=int, help='Rarification depth for each sample', default=None)
     parser.add_argument('--tmp-dir', type=str, help='Temporary directory to use for DIAMOND', default=None)
+    parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
 
     args = parser.parse_args(sys.argv[1:])
-    # add file logging
-    logger.add("shotgun_pipeline.log", rotation="10 MB")
+    # set logging level
+    logger.remove()
+    logger.add("shotgun_pipeline.log", rotation="10 MB", level=args.log_level.upper())
     logger.info("Starting shotgun pipeline")
 
     if args.type:
