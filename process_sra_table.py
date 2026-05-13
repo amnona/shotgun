@@ -137,7 +137,7 @@ def main(argv):
     parser.add_argument('-i', '--input', help='SRA table file name', required=True)
     parser.add_argument('-p', '--parallel', help='Process samples in parallel', action='store_true', default=False)
     parser.add_argument('--num-parallel', type=int, help='Maximum number of parallel processes to run simultaneously', default=10)
-    parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)', default=0)
+    parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: rarify, 4: align, 5: split)', default=0)
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--pipeline-script', type=str, help='Path to the shotgun pipeline script', default='~/git/shotgun/shotgun_pipeline.py')
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd', action=TrackAction)

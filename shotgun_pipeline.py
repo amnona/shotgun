@@ -352,10 +352,10 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         # Step 3: Rarify to specified depth (if depth is 0, no rarification is performed and the original fasta file is copied to the rarified fasta file)
         rarify_fasta(sample_id, depth=depth, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 4:
-        # Step 3: Align to UniRef
+        # Step 4: Align to UniRef
         align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads, iterate=iterate, tmp_dir=tmp_dir)
     if start_step <= 5:
-        # Step 4: Split to per-UniRef ID files
+        # Step 5: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
     logger.info(f"Finished processing sample {sample_id}")
     return
