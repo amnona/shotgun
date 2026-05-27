@@ -144,7 +144,7 @@ def denoise_reads(pos_nums, noise_level=0.05):
     return out_pos_nums
 
 
-def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95):
+def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95, simple=False):
     '''Count the number of variants at each position for a given uniref_id in the result files in the specified directory, and optionally plot the distribution of the number of variants at each position
 
     Parameters
@@ -163,6 +163,8 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
         the minimum number of files (samples) in which the uniref_id must be present to consider the results valid (default: 5)
     percentile: int, optional
         the percentile of the number of reads per position to return (use 100 to get the maximal number of variants)
+    simple: bool
+        if True, only count the total number of reads mapped to the uniref_id per sample, without counting the number of variants (default: False)
     
     Returns
     -------
@@ -186,14 +188,18 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
         res_df = pd.read_csv(res_file, sep='\t', header=None)
         res_df.columns = columns
         logger.debug(f'found {len(res_df)} matching reads in file {res_file}')
-        all_prot, all_ids, all_info = align(res_df)
-        pos_nums = calc_windows(all_prot, window_size=window_size)
-        # denoise the reads to remove sequences that are read errors
-        pos_nums = denoise_reads(pos_nums)
+        if simple:
+            # simple mode: only count the number of reads mapped to the uniref_id, without counting the number of variants
+            num_unique = len(res_df)
+        else:
+            all_prot, all_ids, all_info = align(res_df)
+            pos_nums = calc_windows(all_prot, window_size=window_size)
+            # denoise the reads to remove sequences that are read errors
+            pos_nums = denoise_reads(pos_nums)
 
-        num_diff = [np.sum(np.array(list(pos_nums[i].values()))>min_reads) for i in range(len(all_prot[0]))]
-        num_unique = np.percentile(num_diff, percentile, axis=0)
-        id_len = len(all_prot[0])
+            num_diff = [np.sum(np.array(list(pos_nums[i].values()))>min_reads) for i in range(len(all_prot[0]))]
+            num_unique = np.percentile(num_diff, percentile, axis=0)
+            id_len = len(all_prot[0])
         logger.debug(f'sample {os.path.basename(res_file)}: {percentile}% unique: {num_unique}, total reads: {len(res_df)}')
         sample_name = res_file.split('/')[-2]
         all_num[sample_name] = num_unique
@@ -254,7 +260,7 @@ def get_ids_list(base_dir):
     logger.info(f'Found {len(uniref_ids)} unique uniref ids across the samples')
     return uniref_ids
 
-def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, output_file='uniref-table.txt', min_samples_per_uniref=5, window_size=50, num_ids=None, normalize_reads_per_gene=False):
+def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, output_file='uniref-table.txt', min_samples_per_uniref=5, window_size=50, num_ids=None, normalize_reads_per_gene=False, min_reads_for_norm=20, simple=False):
     if reads_file is None:
         reads_file = create_reads_table(base_dir)
 
@@ -292,7 +298,7 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
                 logger.info(f'Processed {cidx} uniref ids, stopping as num_ids is set to {num_ids}')
                 break
             logger.debug(f'Processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
-            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref)
+            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref, simple=simple)
             if len(all_num) == 0:
                 continue
             f.write(uniref_id)
@@ -302,7 +308,10 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
                     num_variants = all_num[csample_id]
                     if normalize_reads_per_gene:
                         if csample_id in all_tot_reads and all_tot_reads[csample_id] > 0:
-                            num_variants = num_variants / all_tot_reads[csample_id]
+                            tot_reads = all_tot_reads[csample_id]
+                            if tot_reads < min_reads_for_norm:
+                                tot_reads = min_reads_for_norm
+                            num_variants = num_variants / tot_reads
                         else:
                             logger.warning(f'No reads found for sample {csample_id} in uniref_id {uniref_id}, cannot normalize by reads, keeping original variant count')
                             num_variants = 0
@@ -323,13 +332,15 @@ def main(argv):
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
     parser.add_argument('--num-ids', type=int, help='Number of uniref ids to process (for testing purposes, None to process all)', default=None)
     parser.add_argument('--normalize-reads-per-gene', action='store_true', help='Whether to normalize each variant count by the total number of reads mapped to the gene (in each sample)')
+    parser.add_argument('--min-reads-for-norm', type=int, help='Minimum number of reads for normalization by reads (lower read number are updated to it), to avoid inflating the variant count for lowly covered genes (default: 20)', default=20)
+    parser.add_argument('--simple', action='store_true', help='If True, only count number of mapped reads per uniref id per sample, without counting the number of variants')
 
     args = parser.parse_args(sys.argv[1:])
     logger.remove()  # Remove default logger
     logger.add(sys.stderr, level=args.log_level)  # Add new logger with specified log level
 
     logger.info("Starting split-to-uniref pipeline")
-    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, output_file=args.output_file, min_samples_per_uniref=args.min_samples_per_uniref, window_size=args.window_size, num_ids=args.num_ids, normalize_reads_per_gene=args.normalize_reads_per_gene)
+    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, output_file=args.output_file, min_samples_per_uniref=args.min_samples_per_uniref, window_size=args.window_size, num_ids=args.num_ids, normalize_reads_per_gene=args.normalize_reads_per_gene, min_reads_for_norm=args.min_reads_for_norm, simple=args.simple)
     logger.info("Split-to-uniref pipeline finished")
 
 
