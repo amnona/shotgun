@@ -218,8 +218,18 @@ def create_reads_table(base_dir, output_file='reads.txt'):
     -------
     str        The path to the output file containing the reads table
     '''
+    logger.info(f'Creating reads table {output_file} for base directory {base_dir}')
     with open(output_file, 'w') as f:
-        subprocess.run(f'grep -c ">" {base_dir}/*.clean.fasta > {output_file}', shell=True)
+        dir_name = os.path.join(base_dir, '*.clean.fasta')
+        subprocess.run(f'grep -c ">" {dir_name} > {output_file}', shell=True)
+        # read the output file into a pandas dataframe
+        reads = pd.read_csv(output_file, sep=':', header=None, names=['sampleid', 'reads'])
+        # remove the path and the -1.clean.fasta suffix from the sampleid column
+        reads['sampleid'] = reads['sampleid'].apply(lambda x: os.path.basename(x))
+        # write the dataframe back to the output file
+        reads.to_csv(output_file, sep='\t', index=False)
+
+    logger.debug(f'Reads table {output_file} created')
     return output_file
 
 
@@ -244,17 +254,19 @@ def get_ids_list(base_dir):
     logger.info(f'Found {len(uniref_ids)} unique uniref ids across the samples')
     return uniref_ids
 
-def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, output_file='uniref-table.txt'):
+def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, output_file='uniref-table.txt', min_samples_per_uniref=5, window_size=50, num_ids=None, normalize_reads_per_gene=False):
     if reads_file is None:
         reads_file = create_reads_table(base_dir)
 
     # metadata = pd.read_csv(base_dir+'/table.csv',sep=',', index_col='Run')
     metadata = pd.read_csv(os.path.join(base_dir, metadata_file), sep='\t', index_col='Run')
-    reads = pd.read_csv(reads_file, sep=':', header=None, names=['sampleid', 'reads'])
+    reads = pd.read_csv(reads_file, sep='\t', header=None, names=['sampleid', 'reads'])
 
     # get the list of all the sample files
     all_samples = []
-    for cname in glob.glob(os.path.join(base_dir, f"*-splits")):
+    split_dirs = glob.glob(os.path.join(base_dir, f"*-splits"))
+    logger.info(f'Found {len(split_dirs)} sample split directories in base directory {base_dir}')
+    for cname in split_dirs:
         baseid = os.path.basename(cname).split('-splits')[0]
         sid = f'{baseid}-1.clean.fasta'
         if sid in reads['sampleid'].values:
@@ -276,15 +288,25 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
         f.write('\n')
 
         for cidx, uniref_id in enumerate(ids_list):
+            if num_ids is not None and cidx >= num_ids:
+                logger.info(f'Processed {cidx} uniref ids, stopping as num_ids is set to {num_ids}')
+                break
             logger.debug(f'Processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
-            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=50, plot_it=False, min_files=5)
+            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref)
             if len(all_num) == 0:
                 continue
             f.write(uniref_id)
             for csample in all_samples:
                 csample_id = f'{csample}-splits'
                 if csample_id in all_num:
-                    f.write(f'\t{all_num[csample_id]}')
+                    num_variants = all_num[csample_id]
+                    if normalize_reads_per_gene:
+                        if csample_id in all_tot_reads and all_tot_reads[csample_id] > 0:
+                            num_variants = num_variants / all_tot_reads[csample_id]
+                        else:
+                            logger.warning(f'No reads found for sample {csample_id} in uniref_id {uniref_id}, cannot normalize by reads, keeping original variant count')
+                            num_variants = 0
+                    f.write(f'\t{num_variants}')
                 else:
                     f.write('\t0')
             f.write('\n')
@@ -294,16 +316,20 @@ def main(argv):
     parser.add_argument('--version', action='version', version='%(prog)s ' + __version__)
     parser.add_argument('-b', '--base-dir', help='Base directory where the sample splits are located', default='.')
     parser.add_argument('-m', '--metadata-file', help='Metadata file (tab-separated) with sample information, must contain a "Run" column with sample ids', default='map.txt')
-    parser.add_argument('-r', '--reads-file', help='File (tab-separated) with sample ids and their read counts, must contain "sampleid" and "reads" columns. If not provided, will auto-generate', default=None)
+    parser.add_argument('-r', '--reads-file', help='File (tab-separated) with sample ids and their read counts, must contain "sampleid" and "reads" columns. tsv. If not provided, will auto-generate', default=None)
     parser.add_argument('-o', '--output-file', help='Output file to write the uniref table to', default='uniref-table.txt')
+    parser.add_argument('--min-samples-per-uniref', type=int, help='Minimum number of samples a uniref_ID must be present in to be included in output table', default=5)
+    parser.add_argument('--window-size', type=int, help='Window size for counting sequence variants', default=50)
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
+    parser.add_argument('--num-ids', type=int, help='Number of uniref ids to process (for testing purposes, None to process all)', default=None)
+    parser.add_argument('--normalize-reads-per-gene', action='store_true', help='Whether to normalize each variant count by the total number of reads mapped to the gene (in each sample)')
 
     args = parser.parse_args(sys.argv[1:])
     logger.remove()  # Remove default logger
     logger.add(sys.stderr, level=args.log_level)  # Add new logger with specified log level
 
     logger.info("Starting split-to-uniref pipeline")
-    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, output_file=args.output_file)
+    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, output_file=args.output_file, min_samples_per_uniref=args.min_samples_per_uniref, window_size=args.window_size, num_ids=args.num_ids, normalize_reads_per_gene=args.normalize_reads_per_gene)
     logger.info("Split-to-uniref pipeline finished")
 
 
