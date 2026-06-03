@@ -172,7 +172,7 @@ def rarify_fasta(sample_id, depth, seqtk_path='seqtk', skip_if_exists=True, rand
     logger.debug(f"Rarified sample {sample_id} to depth {depth}")
     return
 
-def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity='fast', threads='10', iterate=False, tmp_dir=None):
+def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity=None, threads='10', iterate=False, tmp_dir=None):
     '''Align input fasta file to UniRef database using DIAMOND
     Parameters
     ----------
@@ -186,8 +186,8 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         path to DIAMOND binary
     skip_if_exists: bool, optional
         if true, skip alignment if the output file already exists
-    sensitivity: str, optional
-        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+    sensitivity: None or str, optional
+        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive). If None, use the default diamond sensitivity (between mid-sensitive and fast, >60%)
     iterate: bool, optional
         whether to use the --iterate flag for DIAMOND alignment (for iterative searches, recommended for more sensitive modes)
     threads: str, optional
@@ -195,8 +195,8 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
     tmp_dir: str, optional
         path to temporary directory to use for DIAMOND (if not set, will use current directory)
     '''
-    output_file = f"{sample_id}-aligned.txt"
     input_fasta = f"{sample_id}-1.clean.rarified.fasta"
+    output_file = f"{sample_id}-aligned.txt"
     if skip_if_exists:
         if os.path.exists(output_file):
                 logger.info(f"Alignment output file {output_file} already exists, skipping alignment")
@@ -210,7 +210,6 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         'blastx',
         '--db', diamond_db,
         '--out', output_file,
-        '--' + sensitivity,
         '--min-orf', '30',
         '--query', input_fasta,
         '--evalue', '1e-5',
@@ -218,6 +217,9 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         '--max-target-seqs', '1',
         '--un', output_file + '.unmatched.fasta',
         '--threads', threads]
+    # add sensitivity mode if specified
+    if sensitivity is not None:
+        command.append('--'+sensitivity)
     # if using tmp dir, add it to the command
     if tmp_dir is not None:
         tmp_dir = os.path.expanduser(tmp_dir)
@@ -306,7 +308,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', threads='10', iterate=False, paired=False, depth=0, tmp_dir=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin'):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity=None, threads='10', iterate=False, paired=False, depth=0, tmp_dir=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin'):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -325,8 +327,8 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
             step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
     database: str, optional
         location of the diamond uniref database to use for alignment
-    sensitivity: str, optional
-        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)
+    sensitivity: None or str, optional
+        sensitivity mode for DIAMOND (fast, sensitive, more-sensitive). If None, use the default diamond sensitivity (between mid-sensitive and fast, >60%)
     paired: bool, optional
         whether the input data is paired-end (True) or single-end (False)
     depth: int, optional
@@ -368,9 +370,9 @@ def main(argv):
     parser.add_argument('--skip-if-exists', action='store_true', help='Skip processing steps if output files already exist', default=True)
     parser.add_argument('--start-step', type=int, help='Step to start from (0: download, 1: clean, 2: convert to fasta, 3: rarify, 4: align, 5: split)', default=0)
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd')
-    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast')
+    parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive), leave empty for default diamond sensitivity (>60%, between fast and mid-sensitive)', default=None)
     parser.add_argument('--threads', type=str, help='Number of threads to use for diamond alignment', default='10')
-    parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (database, sensitivity, iterate)', default=None)
+    # parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (database, sensitivity, iterate)', default=None)
     parser.add_argument('--iterate', action='store_true', help='diamond --iterate flag (for iterative searches)', default=False)
     parser.add_argument('--paired', action='store_true', help='Whether to use paired-end data (True) or only forward reads (False)', default=False)
     parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth (0 means no rarification)', default=0)
