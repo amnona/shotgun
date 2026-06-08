@@ -18,7 +18,7 @@ class TrackAction(argparse.Action):
         setattr(namespace, 'provided_args', provided)
 
 
-def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=0, tmp_dir=None, type=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin', paired=False):
+def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline_script='~/git/shotgun/shotgun_pipeline.py', skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity='fast', iterate=False, threads='10', depth=0, tmp_dir=None, type=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin', paired=False, query_coverage=None, max_target_seqs=1):
         '''Run the sample pipeline on all samples listed in the SRA metadata table
         
         Parameters
@@ -49,6 +49,10 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
                 path to temporary directory to use for DIAMOND (if not set, will use current directory)
         sra_path: str, optional
                 path to sra-toolkit binaries (used for downloading samples)
+        query_coverage: float or None, optional
+                minimum query coverage percentage for DIAMOND alignments. None to disable query coverage filtering
+        max_target_seqs: int, optional
+                maximum number of target sequences to report for each query sequence in DIAMOND alignment (default is 1, meaning only the top hit will be reported)
         type: str, optional
                 if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database) unless those parameters were explicitly provided by the user
                 None (default): use provided or default parameters for all settings
@@ -77,6 +81,7 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
         samples = []
         ifile = csv.DictReader(open(inputname, 'r'), delimiter=delimiter)
         for cline in ifile:
+                csamp = None
                 if 'Run_s' in cline:
                         csamp = cline['Run_s']
                 elif 'Run' in cline:
@@ -93,6 +98,12 @@ def run_pipeline_on_sra_table(inputname, parallel=True, num_parallel=4, pipeline
         # Add the tmp dir if provided
         if tmp_dir:
             base_cmd += ['--tmp-dir', tmp_dir]
+        # Add query coverage if provided
+        if query_coverage is not None:
+            base_cmd += ['--query-coverage', str(query_coverage)]
+        # Add max target sequences if provided
+        if max_target_seqs is not None:
+            base_cmd += ['--max-target-seqs', str(max_target_seqs)]
         for x in base_cmd:
                 logger.debug(f"Command component: {x}")
         logger.debug(f"Base command for pipeline: {' '.join(base_cmd)}")
@@ -143,6 +154,8 @@ def main(argv):
     parser.add_argument('--database', type=str, help='Path to the database to use for alignment', default='~/databases/uniref/db-uniref50.dmnd', action=TrackAction)
     parser.add_argument('--sensitivity', type=str, help='Sensitivity mode for DIAMOND (fast, sensitive, more-sensitive)', default='fast', action=TrackAction)
     parser.add_argument('--iterate', action='store_true', help='Iterate over split files during alignment', default=False)
+    parser.add_argument('--query-coverage',type=int, help='minimal percent of query sequence that must be covered by the alignment for it to be reported (default is None, meaning no query coverage filter)', default=None)
+    parser.add_argument('--max-target-seqs', type=int, help='maximum number of target sequences to report for each query sequence in DIAMOND alignment (default is 1, meaning only the top hit will be reported)', default=1)
     parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (iterate, sensitivity, database)', default=None)
     parser.add_argument('--threads', type=str, help='Number of threads to use for each sample pipeline', default='5')
     parser.add_argument('--depth', type=int, help='Rarification depth for each sample (0 means no rarification)', default=0)
@@ -150,6 +163,7 @@ def main(argv):
     parser.add_argument('--tmp-dir', type=str, help='Temporary directory to use for DIAMOND', default=None)
     parser.add_argument('--sra-path', type=str, help='Path to sra-toolkit binaries', default='~/bin/sratoolkit.3.3.0-alma_linux64/bin')
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
+
 
     args = parser.parse_args(sys.argv[1:])
     
@@ -177,7 +191,7 @@ def main(argv):
             logger.warning(f"Unknown type {args.type}, using provided or default parameters")
 
 
-    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, threads=args.threads, depth=args.depth, tmp_dir=args.tmp_dir, type=args.type, sra_path=args.sra_path, paired=args.paired)
+    run_pipeline_on_sra_table(args.input, parallel=args.parallel, num_parallel=args.num_parallel, skip_if_exists=args.skip_if_exists, start_step=args.start_step, pipeline_script=args.pipeline_script, database=args.database, sensitivity=args.sensitivity, iterate=args.iterate, threads=args.threads, depth=args.depth, tmp_dir=args.tmp_dir, type=args.type, sra_path=args.sra_path, paired=args.paired, query_coverage=args.query_coverage, max_target_seqs=args.max_target_seqs)
     logger.info("Shotgun pipeline finished")
 
 
