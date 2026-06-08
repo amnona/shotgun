@@ -172,7 +172,7 @@ def rarify_fasta(sample_id, depth, seqtk_path='seqtk', skip_if_exists=True, rand
     logger.debug(f"Rarified sample {sample_id} to depth {depth}")
     return
 
-def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity=None, threads='10', iterate=False, tmp_dir=None):
+def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd', diamond_path='~/bin/diamond', skip_if_exists=True, log_file='process.log',sensitivity=None, threads='10', iterate=False, tmp_dir=None, query_coverage=None, max_target_seqs=1):
     '''Align input fasta file to UniRef database using DIAMOND
     Parameters
     ----------
@@ -194,6 +194,10 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         number of threads to use for DIAMOND alignment
     tmp_dir: str, optional
         path to temporary directory to use for DIAMOND (if not set, will use current directory)
+    query_coverage: float, optional
+        minimum query coverage percentage for DIAMOND alignments
+    max_target_seqs: int, optional
+        maximum number of target sequences to report for each query sequence in DIAMOND alignment (default is 1, meaning only the top hit will be reported)
     '''
     input_fasta = f"{sample_id}-1.clean.rarified.fasta"
     output_file = f"{sample_id}-aligned.txt"
@@ -214,12 +218,15 @@ def align_to_uniref(sample_id, diamond_db='~/databases/uniref/db-uniref90.dmnd',
         '--query', input_fasta,
         '--evalue', '1e-5',
         '--strand', 'both',
-        '--max-target-seqs', '1',
+        '--header', 'simple',
+        '--max-target-seqs', str(max_target_seqs),
         '--un', output_file + '.unmatched.fasta',
         '--threads', threads]
     # add sensitivity mode if specified
     if sensitivity is not None:
         command.append('--'+sensitivity)
+    if query_coverage is not None:
+        command.extend(['--query-cover', str(query_coverage)])
     # if using tmp dir, add it to the command
     if tmp_dir is not None:
         tmp_dir = os.path.expanduser(tmp_dir)
@@ -285,12 +292,15 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
             buffers[uniref_id].clear()
     
     with open(diamond_output, 'r') as f:
+        header = f.readline()  # skip header
         for line in f:
             parts = line.strip().split('\t', maxsplit=1)
             uniref_id = parts[0]
             uniref_counts[uniref_id] += 1
+            if len(buffers[uniref_id]) == 0:
+                buffers[uniref_id].append(header)  # add header to new buffer
             buffers[uniref_id].append(line)
-            
+    
             # Flush if buffer reaches threshold
             if len(buffers[uniref_id]) >= buffer_threshold:
                 flush_buffer(uniref_id)
@@ -308,7 +318,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     return
 
 
-def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity=None, threads='10', iterate=False, paired=False, depth=0, tmp_dir=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin'):
+def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/databases/uniref/db-uniref50.dmnd', sensitivity=None, threads='10', iterate=False, paired=False, depth=0, tmp_dir=None, sra_path='~/bin/sratoolkit.3.3.0-alma_linux64/bin', query_coverage=None, max_target_seqs=1):
     '''Process a single sample given its SRA ID
     Steps:
     1. Download the sample using sra-toolkit prefetch+fasterq-dump
@@ -324,7 +334,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
     skip_if_exists: bool, optional
             if true, skip each processing step if the relevant output file already exists
     start_step: int, optional
-            step to start from (0: download, 1: clean, 2: convert to fasta, 3: align, 4: split)
+            step to start from (0: download, 1: clean, 2: convert to fasta, 3: rarify, 4: align, 5: split)
     database: str, optional
         location of the diamond uniref database to use for alignment
     sensitivity: None or str, optional
@@ -339,6 +349,12 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         whether to use the --iterate flag for diamond alignment (for iterative searches, recommended for more sensitive modes)
     tmp_dir: str, optional
         path to temporary directory to use for DIAMOND (if not set, will use current directory)
+    sra_path: str, optional
+        path to sra-toolkit binaries
+     query_coverage: float or None, optional
+        minimum query coverage percentage for DIAMOND alignments. None to disable query coverage filtering
+    max_target_seqs: int, optional
+        maximum number of target sequences to report for each query sequence in DIAMOND alignment (default is 1, meaning only the top hit will be reported)
     '''
     log_file = f'process-{sample_id}.log'
     logger.info(f"Processing sample {sample_id}")
@@ -356,7 +372,7 @@ def sample_pipeline(sample_id, skip_if_exists=True, start_step=0, database='~/da
         rarify_fasta(sample_id, depth=depth, skip_if_exists=skip_if_exists, log_file=log_file)
     if start_step <= 4:
         # Step 4: Align to UniRef
-        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads, iterate=iterate, tmp_dir=tmp_dir)
+        align_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file, diamond_db=database, sensitivity=sensitivity, threads=threads, iterate=iterate, tmp_dir=tmp_dir, query_coverage=query_coverage, max_target_seqs=max_target_seqs)
     if start_step <= 5:
         # Step 5: Split to per-UniRef ID files
         split_to_uniref(sample_id, skip_if_exists=skip_if_exists, log_file=log_file)
@@ -374,6 +390,8 @@ def main(argv):
     parser.add_argument('--threads', type=str, help='Number of threads to use for diamond alignment', default='10')
     # parser.add_argument('--type', type=str, help='if "uniref50" or "uniref90" use relevant defaults (database, sensitivity, iterate)', default=None)
     parser.add_argument('--iterate', action='store_true', help='diamond --iterate flag (for iterative searches)', default=False)
+    parser.add_argument('--query-coverage',type=int, help='minimal percent of query sequence that must be covered by the alignment for it to be reported (default is None, meaning no query coverage filter)', default=None)
+    parser.add_argument('--max-target-seqs', type=int, help='maximum number of target sequences to report for each query sequence in DIAMOND alignment (default is 1, meaning only the top hit will be reported)', default=1)
     parser.add_argument('--paired', action='store_true', help='Whether to use paired-end data (True) or only forward reads (False)', default=False)
     parser.add_argument('--depth', type=int, help='If set, rarify each sample to this depth (0 means no rarification)', default=0)
     parser.add_argument('--tmp-dir', type=str, help='Path to temporary directory to use for DIAMOND (if not set, will use current directory)', default=None)
@@ -382,7 +400,7 @@ def main(argv):
     # add file logging
     logger.add("shotgun_pipeline.log", rotation="10 MB")
     logger.info("Starting shotgun pipeline")
-    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth, tmp_dir=args.tmp_dir, sra_path=args.sra_path)
+    sample_pipeline(args.accession, skip_if_exists=args.skip_if_exists, start_step=args.start_step, database=args.database, sensitivity=args.sensitivity, threads=args.threads, iterate=args.iterate, paired=args.paired, depth=args.depth, tmp_dir=args.tmp_dir, sra_path=args.sra_path, query_coverage=args.query_coverage, max_target_seqs=args.max_target_seqs)
     logger.info("Shotgun pipeline finished")
 
 

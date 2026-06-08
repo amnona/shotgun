@@ -40,26 +40,22 @@ def align(ref_reads):
     all_prot = []
     all_ids = []
     all_info = []
-    max_pos = ref_reads['sstart'].max()*3 + 150
-    for cpos,crow in ref_reads.iterrows():
-        cseq = crow['full_qseq']
-        cframe = crow['qframe']
-        if crow['qstrand']=='-':
-            cseq = rev_comp(cseq[crow['qend']:crow['qstart']])
-            cfull_seq = cseq
-            cfull_seq = '-'*((crow['sstart'])*3) + cfull_seq
-            # complete to the right with '-' up to the max position
-            cfull_seq = cfull_seq + '-'*(max_pos - len(cfull_seq))
-            # continue
+    max_pos = int(ref_reads['sstart'].max()) * 3 + 150
+    for crow in ref_reads.itertuples(index=False):
+        cseq = crow.full_qseq
+        if crow.qstrand == '-':
+            cseq = rev_comp(cseq[crow.qend:crow.qstart])
+            cfull_seq = '-' * (crow.sstart * 3) + cseq
+            cfull_seq = cfull_seq + '-' * (max_pos - len(cfull_seq))
         else:
-            start_pos = crow['qstart']-1
-            end_pos = crow['qend']-1
+            start_pos = crow.qstart - 1
+            end_pos = crow.qend - 1
             cfull_seq = cseq[start_pos:end_pos]
-            cfull_seq = '-'*(crow['sstart']*3) + cfull_seq
-            cfull_seq = cfull_seq + '-'*(max_pos - len(cfull_seq))
+            cfull_seq = '-' * (crow.sstart * 3) + cfull_seq
+            cfull_seq = cfull_seq + '-' * (max_pos - len(cfull_seq))
         all_prot.append(cfull_seq)
-        all_ids.append(crow['qseqid'])
-        all_info.append([crow['qstrand'], cfull_seq])
+        all_ids.append(crow.qseqid)
+        all_info.append([crow.qstrand, cfull_seq])
     return all_prot, all_ids, all_info
 
 
@@ -77,11 +73,22 @@ def calc_windows(all_prot, window_size=25):
     '''
     pos_nums = defaultdict(lambda: defaultdict(int))
     for cseq in all_prot:
-        for i in range(len(cseq)-window_size+1):
-            tseq = cseq[i:i+window_size]
-            if '-' in tseq:
+        i = 0
+        seq_len = len(cseq)
+        while i < seq_len:
+            if cseq[i] == '-':
+                i += 1
                 continue
-            pos_nums[i][tseq] += 1
+            j = i
+            while j < seq_len and cseq[j] != '-':
+                j += 1
+            seg_len = j - i
+            if seg_len >= window_size:
+                segment = cseq[i:j]
+                max_local = seg_len - window_size
+                for local in range(max_local + 1):
+                    pos_nums[i + local][segment[local:local + window_size]] += 1
+            i = j
     return pos_nums
 
 
@@ -139,12 +146,12 @@ def denoise_reads(pos_nums, noise_level=0.05):
             if int_count > 0:
                 result_dict[seq] = int_count
                 
-        out_pos_nums[cpos] = result_dict
+        out_pos_nums[cpos] = defaultdict(int, result_dict)
     
     return out_pos_nums
 
 
-def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95, simple=False):
+def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95, simple=False, result_files=None):
     '''Count the number of variants at each position for a given uniref_id in the result files in the specified directory, and optionally plot the distribution of the number of variants at each position
 
     Parameters
@@ -175,18 +182,19 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
     id_len: int
         the length of the uniref_id sequence (in nucleotides)
     '''
-    result_files = glob.glob(os.path.join(res_dir, f"*-splits/{uniref_id}"))
+    if result_files is None:
+        result_files = glob.glob(os.path.join(res_dir, f"*-splits/{uniref_id}"))
     all_num = defaultdict(float)
     all_tot_reads = defaultdict(int)
     if len(result_files) < min_files:
-        logger.info(f'Found only {len(result_files)} result files for uniref_id {uniref_id} in directory {res_dir}. Expected at least {min_files} files. Check if the files are in the correct directory and have the correct naming convention.')
+        logger.warning(f'Found only {len(result_files)} result files for uniref_id {uniref_id} in directory {res_dir}. Expected at least {min_files} files. Check if the files are in the correct directory and have the correct naming convention.')
         return all_num, all_tot_reads,0
     id_len = 0
-    columns = 'sseqid qseqid qstart qend qframe qstrand sstart send qseq qseq_translated length evalue bitscore gapopen cigar full_qseq'.split(' ')
+    columns = ['qseqid', 'qstart', 'qend', 'qstrand', 'sstart', 'full_qseq']
+    usecols = [1, 2, 3, 5, 6, 15]
     for res_file in result_files:
         logger.debug(f'parsing file {res_file}')
-        res_df = pd.read_csv(res_file, sep='\t', header=None)
-        res_df.columns = columns
+        res_df = pd.read_csv(res_file, sep='\t', header=None, usecols=usecols, names=columns)
         logger.debug(f'found {len(res_df)} matching reads in file {res_file}')
         if simple:
             # simple mode: only count the number of reads mapped to the uniref_id, without counting the number of variants
@@ -197,9 +205,15 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
             # denoise the reads to remove sequences that are read errors
             pos_nums = denoise_reads(pos_nums)
 
-            num_diff = [np.sum(np.array(list(pos_nums[i].values()))>min_reads) for i in range(len(all_prot[0]))]
-            num_unique = np.percentile(num_diff, percentile, axis=0)
-            id_len = len(all_prot[0])
+            if len(all_prot) == 0:
+                num_unique = 0
+                id_len = 0
+            else:
+                id_len = len(all_prot[0])
+                num_diff = np.zeros(id_len, dtype=np.int32)
+                for pos, seq_counts in pos_nums.items():
+                    num_diff[pos] = sum(1 for val in seq_counts.values() if val > min_reads)
+                num_unique = float(np.percentile(num_diff, percentile, axis=0))
         logger.debug(f'sample {os.path.basename(res_file)}: {percentile}% unique: {num_unique}, total reads: {len(res_df)}')
         sample_name = res_file.split('/')[-2]
         all_num[sample_name] = num_unique
@@ -207,6 +221,18 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
         if only_one:
             break
     return all_num, all_tot_reads, id_len
+
+
+def build_uniref_index(base_dir):
+    '''Build an index of UniRef ids to matching result files in one filesystem pass.'''
+    uniref_to_files = defaultdict(list)
+    split_dirs = glob.glob(os.path.join(base_dir, '*-splits'))
+    for split_dir in split_dirs:
+        with os.scandir(split_dir) as it:
+            for entry in it:
+                if entry.is_file() and entry.name.startswith('UniRef50_') and entry.name.endswith('.txt'):
+                    uniref_to_files[entry.name].append(entry.path)
+    return dict(sorted(uniref_to_files.items(), key=lambda item: len(item[1]), reverse=True))
 
 
 def create_reads_table(base_dir, output_file='reads.txt'):
@@ -251,12 +277,7 @@ def get_ids_list(base_dir):
     -------
     dict of uniref ids appearing in the sample splits (key) and their counts (value)
     '''
-    uniref_ids = defaultdict(int)
-    for name in glob.glob(f'{base_dir}/*-splits/UniRef50_*.txt'):
-        uniref_ids[name.split('/')[-1]] += 1
-
-    # sort the dict
-    uniref_ids = dict(sorted(uniref_ids.items(), key=lambda item: item[1], reverse=True))
+    uniref_ids = {uid: len(paths) for uid, paths in build_uniref_index(base_dir).items()}
     logger.info(f'Found {len(uniref_ids)} unique uniref ids across the samples')
     return uniref_ids
 
@@ -281,8 +302,9 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
             logger.warning(f'Sample {sid} not found in reads.txt, skipping it.')
     logger.info(f'Number of samples found: {len(all_samples)} out of {len(metadata)} samples in metadata')
 
-    uniref_ids = get_ids_list(base_dir)
-    ids_list = list(uniref_ids.keys())
+    uniref_index = build_uniref_index(base_dir)
+    logger.info(f'Found {len(uniref_index)} unique uniref ids across the samples')
+    ids_list = list(uniref_index.keys())
     # permute the uniref ids list to get a random order of checking the uniref ids so we get better estimation of performance
     np.random.shuffle(ids_list)
 
@@ -298,7 +320,7 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
                 logger.info(f'Processed {cidx} uniref ids, stopping as num_ids is set to {num_ids}')
                 break
             logger.debug(f'Processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
-            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref, simple=simple)
+            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref, simple=simple, result_files=uniref_index.get(uniref_id, []))
             if len(all_num) == 0:
                 continue
             f.write(uniref_id)
