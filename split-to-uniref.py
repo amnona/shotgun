@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-__version__ = '2026.05.13'
+__version__ = '2026.06.15'
 
 import os
 import glob
@@ -8,9 +8,11 @@ from collections import defaultdict
 import argparse
 import sys
 import subprocess
+from contextlib import ExitStack
 
 import pandas as pd
 import numpy as np
+import scipy as sp
 
 try:
     from loguru import logger
@@ -40,18 +42,30 @@ def align(ref_reads):
     all_prot = []
     all_ids = []
     all_info = []
-    max_pos = int(ref_reads['sstart'].max()) * 3 + 150
+    # Some input files may include a header-like row or non-numeric values.
+    # Coerce coordinate columns to numeric and skip invalid rows.
+    ref_reads = ref_reads.copy()
+    for col in ['qstart', 'qend', 'sstart']:
+        ref_reads[col] = pd.to_numeric(ref_reads[col], errors='coerce')
+    ref_reads = ref_reads.dropna(subset=['qstart', 'qend', 'sstart'])
+
+    # Convert only the scalar max value (not the whole Series) to int.
+    max_sstart = ref_reads['sstart'].max()
+    max_pos = int(max_sstart) * 3 + 150 if pd.notna(max_sstart) else 150
     for crow in ref_reads.itertuples(index=False):
+        qstart = int(crow.qstart)
+        qend = int(crow.qend)
+        sstart = int(crow.sstart)
         cseq = crow.full_qseq
         if crow.qstrand == '-':
-            cseq = rev_comp(cseq[crow.qend:crow.qstart])
-            cfull_seq = '-' * (crow.sstart * 3) + cseq
+            cseq = rev_comp(cseq[qend:qstart])
+            cfull_seq = '-' * (sstart * 3) + cseq
             cfull_seq = cfull_seq + '-' * (max_pos - len(cfull_seq))
         else:
-            start_pos = crow.qstart - 1
-            end_pos = crow.qend - 1
+            start_pos = qstart - 1
+            end_pos = qend - 1
             cfull_seq = cseq[start_pos:end_pos]
-            cfull_seq = '-' * (crow.sstart * 3) + cfull_seq
+            cfull_seq = '-' * (sstart * 3) + cfull_seq
             cfull_seq = cfull_seq + '-' * (max_pos - len(cfull_seq))
         all_prot.append(cfull_seq)
         all_ids.append(crow.qseqid)
@@ -151,7 +165,8 @@ def denoise_reads(pos_nums, noise_level=0.05):
     return out_pos_nums
 
 
-def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95, simple=False, result_files=None):
+def parse_results(res_dir, uniref_id, methods=['denoise_mean', 'num_reads', 'denoise_deblur', 'num_variants', 'entropy'],
+                  window_size=25, min_reads=0, only_one=False, min_files=5, percentile=95, result_files=None, mean_error=0.005):
     '''Count the number of variants at each position for a given uniref_id in the result files in the specified directory, and optionally plot the distribution of the number of variants at each position
 
     Parameters
@@ -160,6 +175,8 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
         the directory containing the per-sample splits/ids.txt files (from the shotgun_pipeline.py)
     unired_id: str
         the uniref id of the sequences to check (with .txt appended)
+    methods: list of str, optional
+        the stats to calculate. default is all supported methods
     window_size: int
         the size of the window to count the sequences (default: 25)
     min_reads: int
@@ -170,57 +187,102 @@ def parse_results(res_dir, uniref_id, window_size=25, min_reads=0, only_one=Fals
         the minimum number of files (samples) in which the uniref_id must be present to consider the results valid (default: 5)
     percentile: int, optional
         the percentile of the number of reads per position to return (use 100 to get the maximal number of variants)
-    simple: bool
-        if True, only count the total number of reads mapped to the uniref_id per sample, without counting the number of variants (default: False)
+    results_files: list or None, optional
+        if not None, parse only the sample split files listed (i.e. 'SRRXXXX-splits/uniref50-YYY.txt')
+        if None, parse all -splits directories in res_dir
     
     Returns
     -------
-    all_num: defaultdict(float)
-        a dictionary where the keys are the sample names and the values are the specified percentile of the number of variants at each position for that sample for the uniref_id
-    all_tot_reads: defaultdict(int)
-        a dictionary where the keys are the sample names and the values are the total number of reads for that sample mapped to the uniref_id
+    results: dict of:
+        'denoise_mean': defaultdict(float)
+            a dictionary where the keys are the sample names and the values are the specified percentile of the number of variants at each position for that sample for the uniref_id
+            using the mean noise denoising method (based on mean_error parameter)
+        'denoise_deblur': defaultdict(float)
+            a dictionary where the keys are the sample names and the values are the specified percentile of the number of variants at each position for that sample for the uniref_id
+            using the deblur-like denoising method (based on mean_error parameter)
+        'num_variants': defaultdict(float)
+            a dictionary where the keys are the sample names and the values are the specified percentile of the number of variants at each position for that sample for the uniref_id
+            without denoising
+        'num_reads': defaultdict(float)
+            a dictionary where the keys are the sample names and the values are the total number of reads for that sample mapped to the uniref_id        
+        'entropy': defaultdict(float)
+            a dictionary where the keys are the sample names and the values are the entropy of the number of variants at each position for that sample for the uniref_id
     id_len: int
         the length of the uniref_id sequence (in nucleotides)
     '''
+    results = {}
+    for cmethod in methods:
+        results[cmethod] = defaultdict(float)
     if result_files is None:
         result_files = glob.glob(os.path.join(res_dir, f"*-splits/{uniref_id}"))
     all_num = defaultdict(float)
     all_tot_reads = defaultdict(int)
     if len(result_files) < min_files:
         logger.warning(f'Found only {len(result_files)} result files for uniref_id {uniref_id} in directory {res_dir}. Expected at least {min_files} files. Check if the files are in the correct directory and have the correct naming convention.')
-        return all_num, all_tot_reads,0
+        return results, 0
     id_len = 0
     columns = ['qseqid', 'qstart', 'qend', 'qstrand', 'sstart', 'full_qseq']
     usecols = [1, 2, 3, 5, 6, 15]
     for res_file in result_files:
         logger.debug(f'parsing file {res_file}')
         res_df = pd.read_csv(res_file, sep='\t', header=None, usecols=usecols, names=columns)
+        # Handle accidental header rows / malformed rows in result files.
+        for col in ['qstart', 'qend', 'sstart']:
+            res_df[col] = pd.to_numeric(res_df[col], errors='coerce')
+        res_df = res_df.dropna(subset=['qstart', 'qend', 'sstart', 'full_qseq'])
         logger.debug(f'found {len(res_df)} matching reads in file {res_file}')
-        if simple:
-            # simple mode: only count the number of reads mapped to the uniref_id, without counting the number of variants
-            num_unique = len(res_df)
-        else:
+        id_len = len(res_df['full_qseq'].iloc[0]) if len(res_df) > 0 else 0
+        print(uniref_id, id_len)
+        if 'num_reads' in methods:
+            num_reads = len(res_df)
+        if 'num_variants' in methods or 'denoise_deblur' in methods or 'denoise_mean' in methods or 'entropy' in methods:
             all_prot, all_ids, all_info = align(res_df)
             pos_nums = calc_windows(all_prot, window_size=window_size)
             # denoise the reads to remove sequences that are read errors
-            pos_nums = denoise_reads(pos_nums)
-
-            if len(all_prot) == 0:
-                num_unique = 0
-                id_len = 0
-            else:
-                id_len = len(all_prot[0])
-                num_diff = np.zeros(id_len, dtype=np.int32)
-                for pos, seq_counts in pos_nums.items():
+            if 'denoise_deblur' in methods:
+                deblur_pos_nums = denoise_reads(pos_nums)
+                # id_len = len(all_prot[0])
+                num_diff = np.zeros(np.max(list(deblur_pos_nums.keys()))+1, dtype=np.int32)
+                for pos, seq_counts in deblur_pos_nums.items():
                     num_diff[pos] = sum(1 for val in seq_counts.values() if val > min_reads)
-                num_unique = float(np.percentile(num_diff, percentile, axis=0))
-        logger.debug(f'sample {os.path.basename(res_file)}: {percentile}% unique: {num_unique}, total reads: {len(res_df)}')
+                num_denoise_deblur = float(np.percentile(num_diff, percentile, axis=0))
+            if 'num_variants' in methods:
+                # id_len = len(all_prot[0])
+                num_diff = np.zeros(np.max(list(pos_nums.keys()))+1, dtype=np.int32)
+                for pos, seq_counts in pos_nums.items():
+                    num_diff[pos] = sum(1 for val in seq_counts.values())
+                num_variants = float(np.percentile(num_diff, percentile, axis=0))
+            if 'denoise_mean' in methods:
+                # id_len = len(all_prot[0])
+                num_diff = np.zeros(np.max(list(pos_nums.keys()))+1, dtype=np.int32)
+                for pos, seq_counts in pos_nums.items():
+                    num_diff[pos] = len(seq_counts.values())
+                    num_diff[pos] = num_diff[pos] - len(seq_counts) * (1-np.pow((1-mean_error),window_size))
+                num_denoise_mean = float(np.percentile(num_diff, percentile, axis=0))
+            if 'entropy' in methods:
+                entropy_values = np.zeros(np.max(list(pos_nums.keys()))+1, dtype=np.float32)
+                for pos, seq_counts in pos_nums.items():
+                    counts = np.array(list(seq_counts.values()), dtype=np.float32)
+                    entropy_values[pos] = sp.stats.entropy(counts)
+                entropy = float(np.percentile(entropy_values, percentile, axis=0))
+
+        # logger.debug(f'sample {os.path.basename(res_file)}: {percentile}% unique: {num_unique}, total reads: {len(res_df)}')
+        logger.debug(f'sample {os.path.basename(res_file)}: {percentile}% unique:')
         sample_name = res_file.split('/')[-2]
-        all_num[sample_name] = num_unique
-        all_tot_reads[sample_name] = len(res_df)
+        if 'denoise_mean' in methods:
+            results['denoise_mean'][sample_name] = num_denoise_mean
+        if 'denoise_deblur' in methods:
+            results['denoise_deblur'][sample_name] = num_denoise_deblur
+        if 'num_reads' in methods:
+            results['num_reads'][sample_name] = num_reads
+            logger.info(f'sample {os.path.basename(res_file)}: {num_reads} total reads')
+        if 'num_variants' in methods:
+            results['num_variants'][sample_name] = num_variants
+        if 'entropy' in methods:
+            results['entropy'][sample_name] = entropy
         if only_one:
             break
-    return all_num, all_tot_reads, id_len
+    return results, id_len
 
 
 def build_uniref_index(base_dir):
@@ -281,13 +343,17 @@ def get_ids_list(base_dir):
     logger.info(f'Found {len(uniref_ids)} unique uniref ids across the samples')
     return uniref_ids
 
-def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, output_file='uniref-table.txt', min_samples_per_uniref=5, window_size=50, num_ids=None, normalize_reads_per_gene=False, min_reads_for_norm=20, simple=False):
-    if reads_file is None:
-        reads_file = create_reads_table(base_dir)
+def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, min_samples_per_uniref=5,
+                    window_size=50, num_ids=None, min_reads_for_norm=20,
+                    num_reads_out=None, denoise_mean_out=None, mean_noise=0.005,
+                    denoise_deblur_out=None, variants_out=None, entropy_out=None):
+
+    # if reads_file is None:
+    #     reads_file = create_reads_table(base_dir)
 
     # metadata = pd.read_csv(base_dir+'/table.csv',sep=',', index_col='Run')
     metadata = pd.read_csv(os.path.join(base_dir, metadata_file), sep='\t', index_col='Run')
-    reads = pd.read_csv(reads_file, sep='\t', header=None, names=['sampleid', 'reads'])
+    # reads = pd.read_csv(reads_file, sep='\t', header=None, names=['sampleid', 'reads'])
 
     # get the list of all the sample files
     all_samples = []
@@ -296,10 +362,12 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
     for cname in split_dirs:
         baseid = os.path.basename(cname).split('-splits')[0]
         sid = f'{baseid}-1.clean.fasta'
-        if sid in reads['sampleid'].values:
-            all_samples.append(baseid)
-        else:
-            logger.warning(f'Sample {sid} not found in reads.txt, skipping it.')
+
+        all_samples.append(baseid)
+        # if sid in reads['sampleid'].values:
+        #     all_samples.append(baseid)
+        # else:
+        #     logger.warning(f'Sample {sid} not found in reads.txt, skipping it.')
     logger.info(f'Number of samples found: {len(all_samples)} out of {len(metadata)} samples in metadata')
 
     uniref_index = build_uniref_index(base_dir)
@@ -309,38 +377,68 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, outpu
     np.random.shuffle(ids_list)
 
     logger.info(f'Processing {len(ids_list)} uniref ids across {len(all_samples)} samples')
-    with open(output_file, 'w') as f:
-        f.write('uniref_id')
-        for csample in all_samples:
-            f.write(f'\t{csample}')
-        f.write('\n')
+    
+    files=[]
+    methods = []
+    with ExitStack() as stack:
+        if num_reads_out is not None:
+            reads_file = open(num_reads_out, 'w', buffering=1)
+            files.append(reads_file)
+            methods.append('num_reads')
+        if denoise_mean_out is not None:
+            denoise_mean_file = open(denoise_mean_out, 'w', buffering=1)
+            files.append(denoise_mean_file)
+            methods.append('denoise_mean')
+        if denoise_deblur_out is not None:
+            denoise_deblur_file = open(denoise_deblur_out, 'w', buffering=1)
+            files.append(denoise_deblur_file)
+            methods.append('denoise_deblur')
+        if variants_out is not None:
+            variants_file = open(variants_out, 'w', buffering=1)
+            files.append(variants_file)
+            methods.append('num_variants')
+        if entropy_out is not None:
+            entropy_file = open(entropy_out, 'w', buffering=1)
+            files.append(entropy_file)
+            methods.append('entropy')
+        # write the headers for the tables
+        for cfile in files:       
+            cfile.write('uniref_id')
+            for csample in all_samples:
+                cfile.write(f'\t{csample}')
+            cfile.write('\n')
 
         for cidx, uniref_id in enumerate(ids_list):
             if num_ids is not None and cidx >= num_ids:
                 logger.info(f'Processed {cidx} uniref ids, stopping as num_ids is set to {num_ids}')
                 break
             logger.debug(f'Processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
-            all_num, all_tot_reads, all_len = parse_results(base_dir, uniref_id, window_size=window_size, min_files=min_samples_per_uniref, simple=simple, result_files=uniref_index.get(uniref_id, []))
-            if len(all_num) == 0:
+            result, id_len = parse_results(base_dir, uniref_id, methods=methods, window_size=window_size, min_reads=min_reads_for_norm, mean_error=mean_noise)
+            if id_len == 0:
+                logger.warning(f'No valid results found for uniref_id {uniref_id}, skipping it.')
                 continue
-            f.write(uniref_id)
+            for cfile in files:
+                cfile.write(uniref_id)
             for csample in all_samples:
                 csample_id = f'{csample}-splits'
-                if csample_id in all_num:
-                    num_variants = all_num[csample_id]
-                    if normalize_reads_per_gene:
-                        if csample_id in all_tot_reads and all_tot_reads[csample_id] > 0:
-                            tot_reads = all_tot_reads[csample_id]
-                            if tot_reads < min_reads_for_norm:
-                                tot_reads = min_reads_for_norm
-                            num_variants = num_variants / tot_reads
-                        else:
-                            logger.warning(f'No reads found for sample {csample_id} in uniref_id {uniref_id}, cannot normalize by reads, keeping original variant count')
-                            num_variants = 0
-                    f.write(f'\t{num_variants}')
-                else:
-                    f.write('\t0')
-            f.write('\n')
+                if variants_out is not None:
+                    num_variants = result['num_variants'].get(csample_id, 0)
+                    variants_file.write(f'\t{num_variants}')
+                if num_reads_out is not None:
+                    num_reads = result['num_reads'].get(csample_id, 0)
+                    reads_file.write(f'\t{num_reads}')
+                if entropy_out is not None:
+                    entropy = result['entropy'].get(csample_id, 0)
+                    entropy_file.write(f'\t{entropy}')
+                if denoise_mean_out is not None:
+                    num_denoise_mean = result['denoise_mean'].get(csample_id, 0)
+                    denoise_mean_file.write(f'\t{num_denoise_mean}')
+                if denoise_deblur_out is not None:
+                    num_denoise_deblur = result['denoise_deblur'].get(csample_id, 0)
+                    denoise_deblur_file.write(f'\t{num_denoise_deblur}')
+            for cfile in files:
+                cfile.write('\n')
+            logger.info(f'Finished processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
 
 def main(argv):
     parser = argparse.ArgumentParser(description='split-to-uniref version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -348,21 +446,27 @@ def main(argv):
     parser.add_argument('-b', '--base-dir', help='Base directory where the sample splits are located', default='.')
     parser.add_argument('-m', '--metadata-file', help='Metadata file (tab-separated) with sample information, must contain a "Run" column with sample ids', default='map.txt')
     parser.add_argument('-r', '--reads-file', help='File (tab-separated) with sample ids and their read counts, must contain "sampleid" and "reads" columns. tsv. If not provided, will auto-generate', default=None)
-    parser.add_argument('-o', '--output-file', help='Output file to write the uniref table to', default='uniref-table.txt')
     parser.add_argument('--min-samples-per-uniref', type=int, help='Minimum number of samples a uniref_ID must be present in to be included in output table', default=5)
     parser.add_argument('--window-size', type=int, help='Window size for counting sequence variants', default=50)
     parser.add_argument('--log-level', type=str, help='Logging level (DEBUG, INFO, WARNING, ERROR)', default='INFO')
     parser.add_argument('--num-ids', type=int, help='Number of uniref ids to process (for testing purposes, None to process all)', default=None)
-    parser.add_argument('--normalize-reads-per-gene', action='store_true', help='Whether to normalize each variant count by the total number of reads mapped to the gene (in each sample)')
     parser.add_argument('--min-reads-for-norm', type=int, help='Minimum number of reads for normalization by reads (lower read number are updated to it), to avoid inflating the variant count for lowly covered genes (default: 20)', default=20)
-    parser.add_argument('--simple', action='store_true', help='If True, only count number of mapped reads per uniref id per sample, without counting the number of variants')
+    parser.add_argument('--num-reads-out', help='If provided, file name for the number of reads/unirefid table')
+    parser.add_argument('--denoise-mean-out', help='If provided, file name for the num variants/unirefid after mean error rate subtraction (see --mean-noise)')
+    parser.add_argument('--mean-noise', type=float, help='Mean per-nucleotide error rate for the mean-out denoising', default=0.005)
+    parser.add_argument('--denoise-deblur-out', help='If provided, file name for the deblur style denoised num variants/unirefid table')
+    parser.add_argument('--variants-out', help='If provided, file name for the non-denoised variants/unirefid table')
+    parser.add_argument('--entropy-out', help='If provided, file name for the entropy/unirefid table')
 
     args = parser.parse_args(sys.argv[1:])
     logger.remove()  # Remove default logger
     logger.add(sys.stderr, level=args.log_level)  # Add new logger with specified log level
 
     logger.info("Starting split-to-uniref pipeline")
-    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, output_file=args.output_file, min_samples_per_uniref=args.min_samples_per_uniref, window_size=args.window_size, num_ids=args.num_ids, normalize_reads_per_gene=args.normalize_reads_per_gene, min_reads_for_norm=args.min_reads_for_norm, simple=args.simple)
+    split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, min_samples_per_uniref=args.min_samples_per_uniref,
+                    window_size=args.window_size, num_ids=args.num_ids, min_reads_for_norm=args.min_reads_for_norm,
+                    num_reads_out=args.num_reads_out, denoise_mean_out=args.denoise_mean_out, mean_noise=args.mean_noise,
+                    denoise_deblur_out=args.denoise_deblur_out, variants_out=args.variants_out, entropy_out=args.entropy_out)
     logger.info("Split-to-uniref pipeline finished")
 
 

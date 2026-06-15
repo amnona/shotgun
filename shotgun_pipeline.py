@@ -278,6 +278,7 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
     # Dictionary to store buffers and counts for each uniref_id
     buffers = defaultdict(list)
     uniref_counts = defaultdict(int)
+    wrote_headers = set()
     
     def flush_buffer(uniref_id, force=False):
         """Flush buffer for a specific uniref_id to file"""
@@ -297,8 +298,9 @@ def split_to_uniref(sample_id, skip_if_exists=True, min_keep=50, log_file='proce
             parts = line.strip().split('\t', maxsplit=1)
             uniref_id = parts[0]
             uniref_counts[uniref_id] += 1
-            if len(buffers[uniref_id]) == 0:
+            if uniref_id not in wrote_headers:
                 buffers[uniref_id].append(header)  # add header to new buffer
+                wrote_headers.add(uniref_id)
             buffers[uniref_id].append(line)
     
             # Flush if buffer reaches threshold
