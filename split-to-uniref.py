@@ -8,6 +8,7 @@ from collections import defaultdict
 import argparse
 import sys
 import subprocess
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import ExitStack
 
 import pandas as pd
@@ -25,6 +26,38 @@ def rev_comp(seq):
     '''Return the reverse complement of a DNA sequence.'''
     comp_dict = str.maketrans('ACGTacgt', 'TGCAtgca')
     return seq.translate(comp_dict)[::-1]
+
+
+def count_window(ref_reads, window_size=25):
+    '''Count the number of occurances of each sequence of length window_size at each position in the aligned sequences.
+
+    Parameters:
+    ref_reads (pd.DataFrame): the dataframe containing the reads aligned to the reference, with the following columns: 'qseqid', 'qstart', 'qend', 'qframe', 'qstrand', 'sstart', 'send', 'qseq', 'qseq_translated', 'length', 'evalue', 'bitscore', 'gapopen', 'cigar', 'full_qseq'
+    window_size (int): the size of the window to count the sequences
+
+    Returns:
+    pos_nums (defaultdict): a nested dictionary where the keys are the positions in the aligned sequences and the values are dictionaries where the keys are the sequences of length window_size and the values are the number of occurances of each sequence at that position
+    '''
+    pos_nums = defaultdict(lambda: defaultdict(int))
+
+    if ref_reads.empty:
+        return pos_nums
+
+    for crow in ref_reads.itertuples(index=False):
+        qstart = int(crow.qstart)
+        qend = int(crow.qend)
+        sstart = int(crow.sstart)
+        cseq = crow.full_qseq
+        if crow.qstrand == '-':
+            cseq = rev_comp(cseq[qend:qstart])
+        else:
+            cseq = cseq[qstart-1:qend]
+        
+        for i in range(len(cseq) - window_size + 1):
+            pos_nums[sstart * 3 + i][cseq[i:i+window_size]] += 1
+    return pos_nums
+
+
 
 
 def align(ref_reads):
@@ -232,12 +265,12 @@ def parse_results(res_dir, uniref_id, methods=['denoise_mean', 'num_reads', 'den
         res_df = res_df.dropna(subset=['qstart', 'qend', 'sstart', 'full_qseq'])
         logger.debug(f'found {len(res_df)} matching reads in file {res_file}')
         id_len = len(res_df['full_qseq'].iloc[0]) if len(res_df) > 0 else 0
-        print(uniref_id, id_len)
         if 'num_reads' in methods:
             num_reads = len(res_df)
         if 'num_variants' in methods or 'denoise_deblur' in methods or 'denoise_mean' in methods or 'entropy' in methods:
-            all_prot, all_ids, all_info = align(res_df)
-            pos_nums = calc_windows(all_prot, window_size=window_size)
+            # all_prot, all_ids, all_info = align(res_df)
+            # pos_nums = calc_windows(all_prot, window_size=window_size)
+            pos_nums = count_window(res_df, window_size=window_size)
             # denoise the reads to remove sequences that are read errors
             if 'denoise_deblur' in methods:
                 deblur_pos_nums = denoise_reads(pos_nums)
@@ -283,6 +316,22 @@ def parse_results(res_dir, uniref_id, methods=['denoise_mean', 'num_reads', 'den
         if only_one:
             break
     return results, id_len
+
+
+def process_uniref_task(task):
+    '''Process a single UniRef ID for optional multiprocessing.'''
+    uniref_id, base_dir, methods, window_size, min_reads, mean_noise, result_files, min_files = task
+    result, id_len = parse_results(
+        base_dir,
+        uniref_id,
+        methods=methods,
+        window_size=window_size,
+        min_reads=min_reads,
+        mean_error=mean_noise,
+        result_files=result_files,
+        min_files=min_files,
+    )
+    return uniref_id, result, id_len
 
 
 def build_uniref_index(base_dir):
@@ -339,6 +388,7 @@ def get_ids_list(base_dir):
     -------
     dict of uniref ids appearing in the sample splits (key) and their counts (value)
     '''
+    logger.info(f'Building UniRef index for base directory {base_dir}')
     uniref_ids = {uid: len(paths) for uid, paths in build_uniref_index(base_dir).items()}
     logger.info(f'Found {len(uniref_ids)} unique uniref ids across the samples')
     return uniref_ids
@@ -346,7 +396,8 @@ def get_ids_list(base_dir):
 def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, min_samples_per_uniref=5,
                     window_size=50, num_ids=None, min_reads_for_norm=20,
                     num_reads_out=None, denoise_mean_out=None, mean_noise=0.005,
-                    denoise_deblur_out=None, variants_out=None, entropy_out=None):
+                    denoise_deblur_out=None, variants_out=None, entropy_out=None,
+                    jobs=1):
 
     # if reads_file is None:
     #     reads_file = create_reads_table(base_dir)
@@ -382,23 +433,23 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, min_s
     methods = []
     with ExitStack() as stack:
         if num_reads_out is not None:
-            reads_file = open(num_reads_out, 'w', buffering=1)
+            reads_file = stack.enter_context(open(num_reads_out, 'w', buffering=1))
             files.append(reads_file)
             methods.append('num_reads')
         if denoise_mean_out is not None:
-            denoise_mean_file = open(denoise_mean_out, 'w', buffering=1)
+            denoise_mean_file = stack.enter_context(open(denoise_mean_out, 'w', buffering=1))
             files.append(denoise_mean_file)
             methods.append('denoise_mean')
         if denoise_deblur_out is not None:
-            denoise_deblur_file = open(denoise_deblur_out, 'w', buffering=1)
+            denoise_deblur_file = stack.enter_context(open(denoise_deblur_out, 'w', buffering=1))
             files.append(denoise_deblur_file)
             methods.append('denoise_deblur')
         if variants_out is not None:
-            variants_file = open(variants_out, 'w', buffering=1)
+            variants_file = stack.enter_context(open(variants_out, 'w', buffering=1))
             files.append(variants_file)
             methods.append('num_variants')
         if entropy_out is not None:
-            entropy_file = open(entropy_out, 'w', buffering=1)
+            entropy_file = stack.enter_context(open(entropy_out, 'w', buffering=1))
             files.append(entropy_file)
             methods.append('entropy')
         # write the headers for the tables
@@ -408,12 +459,41 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, min_s
                 cfile.write(f'\t{csample}')
             cfile.write('\n')
 
-        for cidx, uniref_id in enumerate(ids_list):
-            if num_ids is not None and cidx >= num_ids:
-                logger.info(f'Processed {cidx} uniref ids, stopping as num_ids is set to {num_ids}')
-                break
-            logger.debug(f'Processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
-            result, id_len = parse_results(base_dir, uniref_id, methods=methods, window_size=window_size, min_reads=min_reads_for_norm, mean_error=mean_noise)
+        selected_ids = ids_list[:num_ids] if num_ids is not None else ids_list
+
+        if jobs > 1:
+            task_iter = [
+                (
+                    uniref_id,
+                    base_dir,
+                    methods,
+                    window_size,
+                    min_reads_for_norm,
+                    mean_noise,
+                    uniref_index[uniref_id],
+                    min_samples_per_uniref,
+                )
+                for uniref_id in selected_ids
+            ]
+            executor = stack.enter_context(ProcessPoolExecutor(max_workers=jobs))
+            result_iter = executor.map(process_uniref_task, task_iter)
+        else:
+            result_iter = (
+                process_uniref_task((
+                    uniref_id,
+                    base_dir,
+                    methods,
+                    window_size,
+                    min_reads_for_norm,
+                    mean_noise,
+                    uniref_index[uniref_id],
+                    min_samples_per_uniref,
+                ))
+                for uniref_id in selected_ids
+            )
+
+        for cidx, (uniref_id, result, id_len) in enumerate(result_iter, start=1):
+            logger.debug(f'Processing uniref_id {cidx}/{len(selected_ids)}: {uniref_id}')
             if id_len == 0:
                 logger.warning(f'No valid results found for uniref_id {uniref_id}, skipping it.')
                 continue
@@ -438,7 +518,7 @@ def split_to_uniref(base_dir='.', metadata_file='map.txt',reads_file=None, min_s
                     denoise_deblur_file.write(f'\t{num_denoise_deblur}')
             for cfile in files:
                 cfile.write('\n')
-            logger.info(f'Finished processing uniref_id {cidx+1}/{len(ids_list)}: {uniref_id}')
+            logger.info(f'Finished processing uniref_id {cidx}/{len(selected_ids)}: {uniref_id}')
 
 def main(argv):
     parser = argparse.ArgumentParser(description='split-to-uniref version ' + __version__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -457,6 +537,7 @@ def main(argv):
     parser.add_argument('--denoise-deblur-out', help='If provided, file name for the deblur style denoised num variants/unirefid table')
     parser.add_argument('--variants-out', help='If provided, file name for the non-denoised variants/unirefid table')
     parser.add_argument('--entropy-out', help='If provided, file name for the entropy/unirefid table')
+    parser.add_argument('--jobs', type=int, help='Number of worker processes to use for per-UniRef processing', default=1)
 
     args = parser.parse_args(sys.argv[1:])
     logger.remove()  # Remove default logger
@@ -466,7 +547,8 @@ def main(argv):
     split_to_uniref(base_dir=args.base_dir, metadata_file=args.metadata_file, reads_file=args.reads_file, min_samples_per_uniref=args.min_samples_per_uniref,
                     window_size=args.window_size, num_ids=args.num_ids, min_reads_for_norm=args.min_reads_for_norm,
                     num_reads_out=args.num_reads_out, denoise_mean_out=args.denoise_mean_out, mean_noise=args.mean_noise,
-                    denoise_deblur_out=args.denoise_deblur_out, variants_out=args.variants_out, entropy_out=args.entropy_out)
+                    denoise_deblur_out=args.denoise_deblur_out, variants_out=args.variants_out, entropy_out=args.entropy_out,
+                    jobs=args.jobs)
     logger.info("Split-to-uniref pipeline finished")
 
 
